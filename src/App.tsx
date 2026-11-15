@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useToken } from "./api/client";
+import { AgentDrawerHost } from "./components/agents/AgentDrawer";
+import { CronJobDrawerHost } from "./components/CronList";
 import { AppShell } from "./components/layout/AppShell";
 import { TokenForm } from "./components/layout/TokenForm";
 import { Skeleton } from "./components/ui/States";
@@ -38,6 +40,9 @@ export default function App() {
           <Office />
         </Suspense>
       )}
+      {/* Drawers are URL-driven (?agent=, ?job=) so any view can open them and Back closes them. */}
+      <AgentDrawerHost />
+      <CronJobDrawerHost />
     </AppShell>
   );
 }

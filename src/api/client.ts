@@ -95,8 +95,8 @@ export const endpoints = {
   cronJobs: "/api/cron/jobs",
   cronRuns: "/api/cron/runs?limit=1000",
   sessions: "/api/activity/sessions?limit=1000",
-  memory: (p: string) => `/api/memory/${encodeURIComponent(p)}`,
-  skills: (p: string) => `/api/skills/${encodeURIComponent(p)}`,
+  memory: (p: string): MemoryPath => `/api/memory/${encodeURIComponent(p)}`,
+  skills: (p: string): SkillsPath => `/api/skills/${encodeURIComponent(p)}`,
 } as const;
 
 export interface EndpointTypes {
