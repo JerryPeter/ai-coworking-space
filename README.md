@@ -5,7 +5,11 @@ bagas_dev_lead, susi_uiux) with a Three.js "office" view. Successor to ~/mission
 
 - Backend: FastAPI (Python venv) in `api/`. Reads ~/.hermes strictly read-only
   (SQLite `mode=ro` + `PRAGMA query_only`, files opened for reading only).
-- Frontend: Vite + React + TypeScript + Three.js (@react-three/fiber) in `src/` (stub for now).
+- Frontend: Vite + React + TypeScript in `src/`, built to Susi's design spec
+  (`~/.hermes/profiles/susi_uiux/deliverables/mission-control-v2-design-spec.md`):
+  Dashboard, Agents, Task Board, Calendar, Activity, Memory & Knowledge, and a plain-Three.js
+  3D office (`src/office/`, lazy-loaded). Hash routes (`/#/agents?agent=pratama_cto`), since the
+  static mount has no SPA fallback. Token is kept in localStorage `mc.token`; a 401 clears it.
 - One port in production: 8742 serves `/health`, `/api/*` and the built frontend (`dist/`).
 - Every `/api/*` route requires `Authorization: Bearer <MISSION_CONTROL_V2_API_TOKEN>`.
 - Binds to 127.0.0.1 only (config refuses anything else).
