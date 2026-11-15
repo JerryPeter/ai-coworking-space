@@ -19,8 +19,10 @@ if not MISSION_CONTROL_V2_API_TOKEN or MISSION_CONTROL_V2_API_TOKEN == "change-m
 if BIND_HOST != "127.0.0.1":
     raise RuntimeError(f"BIND_HOST must be 127.0.0.1 (got {BIND_HOST!r}); this app is local-only")
 
-# Read-only Hermes data sources (never written to).
-HERMES_HOME: Path = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes")))
+# Read-only Hermes data root (never written to). Deliberately NOT read from $HERMES_HOME: Hermes
+# exports HERMES_HOME=<that profile's dir> into every process it spawns, so a server started from
+# inside an agent session would treat one profile as the root and see only "default".
+HERMES_HOME: Path = Path(os.getenv("MISSION_CONTROL_V2_HERMES_ROOT", str(Path.home() / ".hermes")))
 
 # Production frontend (Vite build output). Served at / only if it exists.
 FRONTEND_DIST: Path = PROJECT_ROOT / "dist"
