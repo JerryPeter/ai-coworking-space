@@ -1,0 +1,170 @@
+/* Mission Control V2 design tokens — values from Susi's design spec v1.0 (sections 2, 3, 4, 8).
+   Dark is the default (:root); light applies via [data-theme="light"] on <html>. */
+
+:root {
+  color-scheme: dark;
+
+  /* Backgrounds — 4-step elevation ladder, cool blue-black */
+  --bg-page:              #0B0D12;
+  --bg-surface:           #12151C;
+  --bg-surface-elevated:  #1A1E28;
+  --bg-surface-hover:     #212634;
+  --bg-inset:             #0E1117;
+
+  /* Text */
+  --text-primary:   #E8EAF0;
+  --text-secondary: #A3A9B8;
+  --text-muted:     #6B7285;
+  --text-inverse:   #0B0D12;
+
+  /* Brand / accent (UI chrome only) */
+  --accent-primary:        #5B7CFA;
+  --accent-primary-hover:  #7391FB;
+  --accent-primary-subtle: rgba(91, 124, 250, 0.14);
+  --accent-secondary:      #2DD4BF;
+  --accent-secondary-subtle: rgba(45, 212, 191, 0.12);
+
+  /* Status — solid + subtle */
+  --status-working:          #22C55E;  --status-working-subtle:   rgba(34, 197, 94, 0.14);
+  --status-online:           #22C55E;  --status-online-subtle:    rgba(34, 197, 94, 0.14);
+  --status-idle:             #8394AE;  --status-idle-subtle:      rgba(131, 148, 174, 0.16);
+  --status-reviewing:        #F5B83D;  --status-reviewing-subtle: rgba(245, 184, 61, 0.14);
+  --status-offline:          #B4615F;  --status-offline-subtle:   rgba(180, 97, 95, 0.16);
+  --status-unknown:          #6B7280;  --status-unknown-subtle:   rgba(107, 114, 128, 0.16);
+
+  /* Outcome colors (cron runs, alerts) */
+  --outcome-success: #22C55E;  --outcome-success-subtle: rgba(34, 197, 94, 0.14);
+  --outcome-failed:  #EF4444;  --outcome-failed-subtle:  rgba(239, 68, 68, 0.14);
+  --outcome-running: #F5B83D;  --outcome-running-subtle: rgba(245, 184, 61, 0.14);
+  --outcome-scheduled: #6B7285;
+
+  /* Borders */
+  --border-subtle:  #1F2430;
+  --border-default: #2E3444;
+  --border-strong:  #3D4559;
+  --focus-ring: 0 0 0 2px var(--bg-page), 0 0 0 4px var(--accent-primary);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --overlay-scrim: rgba(5, 7, 10, 0.60);
+  /* Cards at rest: no shadow in dark (spec 4.3) */
+  --card-rest-shadow: none;
+
+  /* Agent identity colors */
+  --agent-hawa:     #A78BFA;  --agent-hawa-subtle:     rgba(167, 139, 250, 0.16);
+  --agent-pratama:  #38BDF8;  --agent-pratama-subtle:  rgba(56, 189, 248, 0.16);
+  --agent-bagas:    #84CC16;  --agent-bagas-subtle:    rgba(132, 204, 22, 0.16);
+  --agent-susi:     #F472B6;  --agent-susi-subtle:     rgba(244, 114, 182, 0.16);
+  --agent-claude:   #F97316;  --agent-claude-subtle:   rgba(249, 115, 22, 0.16);
+
+  /* Typography (spec 3) */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Ubuntu", "Cantarell", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", "Ubuntu Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --text-xs: 12px;    --lh-xs: 16px;
+  --text-sm: 13px;    --lh-sm: 20px;
+  --text-base: 14px;  --lh-base: 22px;
+  --text-lg: 16px;    --lh-lg: 24px;
+  --text-xl: 20px;    --lh-xl: 28px;
+  --text-2xl: 24px;   --lh-2xl: 32px;
+  --text-3xl: 30px;   --lh-3xl: 36px;
+  --text-mono: 13px;  --lh-mono: 20px;
+  --text-micro: 11px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Spacing (spec 4.1; --space-5 is the single allowed exception, agent cards) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Radius (spec 4.2) */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 9999px;
+
+  /* Layout (spec 4.4) */
+  --sidebar-w: 232px;
+  --sidebar-w-collapsed: 64px;
+  --topbar-h: 56px;
+
+  /* Motion (spec 8) */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 100ms;
+  --dur-base: 150ms;
+  --dur-slide: 200ms;
+  --dur-status: 300ms;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-page:             #F5F6F8;
+  --bg-surface:          #FFFFFF;
+  --bg-surface-elevated: #FFFFFF;
+  --bg-surface-hover:    #EEF0F4;
+  --bg-inset:            #F0F2F5;
+
+  --text-primary:   #111318;
+  --text-secondary: #4A5162;
+  --text-muted:     #7A8194;
+  --text-inverse:   #FFFFFF;
+
+  --accent-primary:        #3F5FE8;
+  --accent-primary-hover:  #3350D0;
+  --accent-primary-subtle: rgba(63, 95, 232, 0.10);
+  --accent-secondary:      #0D9488;
+  --accent-secondary-subtle: rgba(13, 148, 136, 0.10);
+
+  --status-working:   #16A34A;  --status-working-subtle:   rgba(22, 163, 74, 0.10);
+  --status-online:    #16A34A;  --status-online-subtle:    rgba(22, 163, 74, 0.10);
+  --status-idle:      #64748B;  --status-idle-subtle:      rgba(100, 116, 139, 0.12);
+  --status-reviewing: #B7791F;  --status-reviewing-subtle: rgba(183, 121, 31, 0.12);
+  --status-offline:   #A0524F;  --status-offline-subtle:   rgba(160, 82, 79, 0.12);
+  --status-unknown:   #6B7280;  --status-unknown-subtle:   rgba(107, 114, 128, 0.12);
+
+  --outcome-success: #16A34A;  --outcome-success-subtle: rgba(22, 163, 74, 0.10);
+  --outcome-failed:  #DC2626;  --outcome-failed-subtle:  rgba(220, 38, 38, 0.08);
+  --outcome-running: #B7791F;  --outcome-running-subtle: rgba(183, 121, 31, 0.12);
+  --outcome-scheduled: #7A8194;
+
+  --border-subtle:  #E6E8EE;
+  --border-default: #D5D9E1;
+  --border-strong:  #B8BECB;
+  --focus-ring: 0 0 0 2px var(--bg-page), 0 0 0 4px var(--accent-primary);
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --overlay-scrim: rgba(17, 19, 24, 0.40);
+  --card-rest-shadow: var(--shadow-sm);
+
+  --agent-hawa:     #7C5CE0;  --agent-hawa-subtle:     rgba(124, 92, 224, 0.10);
+  --agent-pratama:  #0284C7;  --agent-pratama-subtle:  rgba(2, 132, 199, 0.10);
+  --agent-bagas:    #4D7C0F;  --agent-bagas-subtle:    rgba(77, 124, 15, 0.10);
+  --agent-susi:     #DB2777;  --agent-susi-subtle:     rgba(219, 39, 119, 0.10);
+  --agent-claude:   #EA580C;  --agent-claude-subtle:   rgba(234, 88, 12, 0.10);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-slide: 0ms;
+    --dur-status: 0ms;
+    --dur-base: 100ms; /* opacity fades keep 100ms (spec 8) */
+  }
+}

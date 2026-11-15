@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mission Control V2</title>
+    <script>
+      // Apply the saved/preferred theme before first paint (spec 2: mc.theme, else prefers-color-scheme, else dark).
+      (function () {
+        var t = null;
+        try { t = localStorage.getItem("mc.theme"); } catch (e) {}
+        if (t !== "light" && t !== "dark") t = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", t);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

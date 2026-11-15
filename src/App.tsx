@@ -1,9 +1,43 @@
-// Placeholder only. The real UI (incl. the Three.js office) is not built yet.
+import { lazy, Suspense, useEffect, useState } from "react";
+import { useToken } from "./api/client";
+import { AppShell } from "./components/layout/AppShell";
+import { TokenForm } from "./components/layout/TokenForm";
+import { Skeleton } from "./components/ui/States";
+import { useRoute } from "./lib/router";
+import { useSubtitleValue } from "./lib/subtitle";
+import Activity from "./views/Activity";
+import Agents from "./views/Agents";
+import Calendar from "./views/Calendar";
+import Dashboard from "./views/Dashboard";
+import Memory from "./views/Memory";
+import TaskBoard from "./views/TaskBoard";
+
+// The 3D office pulls in Three.js; lazy-load it so other views don't pay for it.
+const Office = lazy(() => import("./views/Office"));
+
 export default function App() {
+  const token = useToken();
+  const { view } = useRoute();
+  const subtitle = useSubtitleValue();
+  // Remember whether we ever had a token, so a 401 can explain why the form reappeared.
+  const [hadToken, setHadToken] = useState(!!token);
+  useEffect(() => { if (token) setHadToken(true); }, [token]);
+
+  if (!token) return <TokenForm expired={hadToken} />;
+
   return (
-    <main>
-      <h1>Mission Control V2</h1>
-      <p>Frontend not built yet. See API_CONTRACT.md.</p>
-    </main>
+    <AppShell subtitle={subtitle}>
+      {view === "dashboard" && <Dashboard />}
+      {view === "agents" && <Agents />}
+      {view === "tasks" && <TaskBoard />}
+      {view === "calendar" && <Calendar />}
+      {view === "activity" && <Activity />}
+      {view === "memory" && <Memory />}
+      {view === "office" && (
+        <Suspense fallback={<div style={{ padding: 24 }}><Skeleton h={480} r={12} /></div>}>
+          <Office />
+        </Suspense>
+      )}
+    </AppShell>
   );
 }

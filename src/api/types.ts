@@ -1,0 +1,202 @@
+// Response shapes of the Mission Control V2 API (from api/routers/*, verified against live data).
+
+export type GatewayStatus = "running" | "stopped" | "unknown";
+export type OfficeState = "working" | "reviewing" | "idle" | "offline" | "unknown";
+export type ToolState = "working" | "idle" | "unknown";
+
+export interface Agent {
+  name: string;
+  display_name: string;
+  description: string | null;
+  home: string;
+  status: GatewayStatus;
+  detail: string | null;
+  gateway_pid: number | null;
+}
+export interface AgentsResponse { agents: Agent[]; count: number; source: string }
+
+export interface Tool {
+  name: string;
+  kind: "tool";
+  state: ToolState;
+  process_count: number;
+  pids: number[];
+  detail: string | null;
+}
+export interface ToolsResponse { tools: Tool[]; source: string }
+
+export interface OfficeAgent {
+  name: string;
+  display_name: string;
+  state: OfficeState;
+  state_reason: string;
+  current_task: { id: string | number; title?: string | null; status?: string; [k: string]: unknown } | null;
+  current_task_id: string | number | null;
+  last_activity: string | null;
+  last_activity_at: string | null;
+  active_ago_min: number | null;
+  gateway: GatewayStatus;
+  session_leases: { available: boolean; live_count: number | null; total: number | null; error: string | null };
+  desk_index: number | null;
+  agent_color: string; // backend placeholder; the UI uses the design-spec colors instead
+}
+export interface OfficeStateResponse {
+  agents: OfficeAgent[];
+  counts: Record<OfficeState, number>;
+  desk_count: number;
+  claude_tool: { name: string; state: ToolState; process_count: number; detail: string | null };
+  kanban: { available: boolean; total: number | null; error: string | null };
+  generated_at: string;
+  source: string;
+}
+
+export interface DashboardSummary {
+  agents: { total: number; source: string };
+  kanban: {
+    total: number | null;
+    by_status: Record<string, number> | null;
+    available: boolean;
+    error: string | null;
+    source: string;
+  };
+  cron: {
+    jobs: number | null;
+    runs_total: number | null;
+    failed_total: number | null;
+    recent_failures: number | null;
+    recent_failures_window_hours: number;
+    failure_definition: string;
+    unreadable_profiles: string[];
+    source: string;
+  };
+  activity: { sessions_24h: number | null; definition: string; unreadable_profiles: string[]; source: string };
+  generated_at: string;
+}
+
+export interface KanbanTask {
+  id: string | number;
+  title: string | null;
+  assignee: string | null;
+  status: string;
+  priority: number | string | null;
+  created_by: string | null;
+  created_at: string | number | null;
+  started_at: string | number | null;
+  completed_at: string | number | null;
+  tenant: string | null;
+  consecutive_failures: number | null;
+}
+export interface KanbanColumn { status: string; label: string; count: number; tasks: KanbanTask[] }
+export interface KanbanResponse {
+  count: number | null;
+  returned: number | null;
+  truncated: boolean;
+  columns: KanbanColumn[] | null;
+  available: boolean;
+  error: string | null;
+  source: string;
+}
+
+export interface CronJob {
+  profile: string;
+  id: string;
+  name: string;
+  prompt: string | null;
+  schedule: { kind: string; minutes?: number; expr?: string; display?: string; [k: string]: unknown } | null;
+  schedule_display: string | null;
+  enabled: boolean;
+  state: string | null;
+  paused_at: string | null;
+  paused_reason: string | null;
+  created_at: string | null;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  last_failure: { at: string; detail: string } | null;
+  failure_streak: number | null;
+  deliver: string | null;
+  model: string | null;
+  [k: string]: unknown;
+}
+export interface CronJobsResponse {
+  jobs: CronJob[];
+  count: number;
+  profiles: { profile: string; jobs_file_present: boolean; count: number | null; error: string | null }[];
+  source: string;
+}
+
+export interface CronRun {
+  profile: string;
+  id: string;
+  job_id: string;
+  source: string | null;
+  status: string; // completed | failed | (running/claimed)
+  claimed_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  delivery_outcome: string | null;
+  scheduled_instant: string | null;
+}
+export interface CronRunsResponse {
+  runs: CronRun[];
+  count: number | null;
+  returned: number;
+  limit_per_profile: number;
+  profiles: { profile: string; available: boolean; total: number | null; error: string | null }[];
+  source: string;
+}
+
+export interface Session {
+  profile: string;
+  id: string;
+  source: string | null;
+  model: string | null;
+  title: string | null;
+  display_name: string | null;
+  started_at: number | null;
+  ended_at: number | null;
+  end_reason: string | null;
+  last_activity_at: number | null;
+  last_activity_description: string | null;
+  message_count: number | null;
+  tool_call_count: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost_usd: number | null;
+  parent_session_id: string | null;
+  started_at_iso: string | null;
+  ended_at_iso: string | null;
+  last_activity_at_iso: string | null;
+}
+export interface SessionsResponse {
+  sessions: Session[];
+  count: number;
+  total: number | null;
+  limit: number;
+  profiles: { profile: string; available: boolean; total: number | null; error: string | null }[];
+  source: string;
+}
+
+export interface MemoryFile {
+  exists: boolean;
+  content: string | null;
+  error: string | null;
+  size_bytes: number | null;
+  sha256?: string | null;
+  updated_at: string | null;
+  identical_to_default?: boolean | null;
+  source: string;
+}
+export interface MemoryResponse { profile: string; memory: MemoryFile; user: MemoryFile }
+
+export interface Skill { dir: string; folder: string; category: string | null; name: string; description: string | null }
+export interface SkillsResponse {
+  profile: string;
+  skills: Skill[];
+  count: number;
+  skills_dir_present: boolean;
+  definition: string;
+  source: string;
+}
