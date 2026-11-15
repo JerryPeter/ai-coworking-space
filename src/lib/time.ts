@@ -29,12 +29,14 @@ export function clock(v: TimeInput): string {
 export function relative(v: TimeInput, now = Date.now()): string {
   const d = toDate(v);
   if (!d) return "Not Available";
-  const diff = now - d.getTime();
+  let diff = now - d.getTime();
+  if (diff < 0 && diff > -60_000) diff = 0; // clock skew between poll timestamp and render: treat as "now"
   const future = diff < 0;
   const s = Math.abs(diff) / 1000;
   if (s >= 86400) return absolute(d);
   let txt: string;
-  if (s < 45) txt = `${Math.max(1, Math.round(s))}s`;
+  if (s < 5 && !future) return "just now";
+  if (s < 45) txt = `${Math.round(s)}s`;
   else if (s < 3600) txt = `${Math.round(s / 60)}m`;
   else {
     const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
