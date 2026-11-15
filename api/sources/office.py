@@ -30,9 +30,16 @@ from api.sources.profiles import agent_info
 DESK_COUNT = 4
 STATES = ("working", "reviewing", "idle", "offline", "unknown")
 ACTIVE_WINDOW_MIN = 15  # idle agents active within this many minutes get active_ago_min
-# Placeholder palette, indexed by desk. Susi's design spec will replace these.
-PLACEHOLDER_COLORS = ("#4F8EF7", "#F7A64F", "#5BC17F", "#C46BE0")
-FALLBACK_COLOR = "#9AA0A6"
+# Dark-theme --agent-* values from Susi's design spec (mission-control-v2-design-spec.md §tokens).
+# Frontend should prefer its theme-aware CSS tokens; this is the reference value for the 3D scene.
+AGENT_COLORS = {
+    "default": "#A78BFA",         # --agent-hawa
+    "pratama_cto": "#38BDF8",     # --agent-pratama
+    "bagas_dev_lead": "#84CC16",  # --agent-bagas
+    "susi_uiux": "#F472B6",       # --agent-susi
+}
+CLAUDE_TOOL_COLOR = "#F97316"     # --agent-claude
+FALLBACK_COLOR = "#9AA0A6"        # unknown/new profile: placeholder until Susi assigns one
 
 
 def _agent_state(info: dict, claims: dict, activity: dict) -> tuple[str, str, dict | None]:
@@ -95,7 +102,7 @@ def office_state() -> dict:
             "gateway": info["status"],
             "session_leases": {k: lz[k] for k in ("available", "live_count", "total", "error")},
             "desk_index": desk,
-            "agent_color": PLACEHOLDER_COLORS[desk] if desk is not None else FALLBACK_COLOR,
+            "agent_color": AGENT_COLORS.get(name, FALLBACK_COLOR),
         })
     tool = claude_tool.scan_claude_tool()
     return {
@@ -104,6 +111,7 @@ def office_state() -> dict:
         "desk_count": DESK_COUNT,
         "claude_tool": {
             "name": claude_tool.TOOL_NAME,
+            "agent_color": CLAUDE_TOOL_COLOR,
             "state": tool["state"],
             "process_count": tool["process_count"],
             "detail": tool["detail"],
