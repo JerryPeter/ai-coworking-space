@@ -28,6 +28,7 @@ def list_tools() -> dict:
             "kind": "tool",
             "state": scan["state"],
             "process_count": scan["process_count"],
+            "pids": scan["pids"],
             "detail": scan["detail"],
         }],
         "source": "process scan of /proc/*/cmdline (argv match: claude ... -p|--print)",

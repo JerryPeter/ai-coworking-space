@@ -11,5 +11,6 @@ def get_office_state() -> dict:
     return {
         **office_state(),
         "source": "gateway.lock + /proc (gateway), ~/.hermes/kanban.db: tasks (claims), "
-                  "<profile>/state.db: sessions (last activity), /proc/*/cmdline (Claude Code CLI)",
+                  "<profile>/state.db: sessions (last activity), "
+                  "<profile>/runtime/active_sessions.json (leases, info only), /proc/*/cmdline (Claude Code CLI)",
     }

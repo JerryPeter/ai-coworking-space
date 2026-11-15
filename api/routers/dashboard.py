@@ -36,7 +36,7 @@ def summary() -> dict:
     return {
         "agents": {"total": len(profiles), "source": "~/.hermes/profiles/* directories and ~/.hermes (default profile)"},
         "kanban": {"total": k["total"], "by_status": k["by_status"], "available": k["available"],
-                   "source": "~/.hermes/kanban.db: tasks"},
+                   "error": k["error"], "source": "~/.hermes/kanban.db: tasks"},
         "cron": {
             "jobs": _sum(job_counts),
             "runs_total": _sum(runs),
