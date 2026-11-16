@@ -2,7 +2,7 @@
 // textures. Each character is a root Group with pivot groups; animation only moves pivots.
 import * as THREE from "three";
 import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
-import { SEATS } from "./room";
+import { DESKS, FLOOR_H, loungeSpotFor, ROBOT_POS } from "./layout";
 
 const DEG = Math.PI / 180;
 const TAU = Math.PI * 2;
@@ -290,15 +290,15 @@ export class Human extends BaseCharacter {
 
   headY() { return 4.0; } // head center, root-local
 
+  // Interim (task 1): desk from DESKS, lounge spot on Floor 1. Replaced by spots/poses in task 3.
   private seat(loc: Loc) {
-    const s = SEATS[this.id];
-    const [x, z] = loc === "desk" ? s.p : s.lounge;
-    return { x, z, y: loc === "desk" ? -0.25 : -0.75, yaw: loc === "desk" ? 0 : s.face };
+    const d = DESKS[this.id], l = loungeSpotFor(this.id);
+    return loc === "desk" ? { x: d.x, z: d.z, y: -0.25, yaw: 0 } : { x: l.x, z: l.z, y: FLOOR_H - 0.75, yaw: l.yaw };
   }
 
   private buildPath(from: Loc, to: Loc): THREE.Vector2[] {
-    const s = SEATS[this.id];
-    const pts: [number, number][] = [s.p, s.exit, [s.exit[0], 3.0], [-1.0, 3.0], [1.0, 3.0], [s.lounge[0], -2.5], s.lounge];
+    const d = DESKS[this.id], l = loungeSpotFor(this.id);
+    const pts: [number, number][] = [[d.x, d.z], d.exit, [l.x, l.z]];
     const v = pts.map(([x, z]) => new THREE.Vector2(x, z));
     return from === "desk" && to === "lounge" ? v : v.reverse();
   }
@@ -466,7 +466,7 @@ export class Robot extends BaseCharacter {
     this.prompt = this.box(r, 0.25, 0.05, 0.02, 0, 1.85, 0.42, this.mat("#FDBA74", "prompt", "#FDBA74", 1.0));
     this.box(r, 0.08, 0.5, 0.08, 0, 2.65, 0, arm);
     this.box(r, 0.2, 0.2, 0.2, 0, 3.0, 0, this.mat("#F97316", "antenna", "#F97316", 1.0));
-    r.position.set(-8.0, 0, -9.2);
+    r.position.set(...ROBOT_POS);
     this.qBaseY = 3.55;
     this.finishQBox(this.qBaseY);
     this.tag.position.set(0, 3.7, 0);

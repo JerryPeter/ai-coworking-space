@@ -11,7 +11,7 @@ import { officeBadge, toolBadge } from "../lib/derive";
 import { setParams, useRoute } from "../lib/router";
 import { relative, useNow } from "../lib/time";
 import { OfficeScene, webglAvailable, type Preset } from "../office/OfficeScene";
-import { SEATS } from "../office/room";
+import { hasSeat } from "../office/layout";
 import type { RobotState } from "../office/characters";
 import { AGENTS, CLAUDE, CLAUDE_ID, identity, rosterIndex } from "../theme/agents";
 
@@ -71,7 +71,7 @@ export default function Office() {
 
   const legend = [
     ...[...(data?.agents ?? [])].sort((a, b) => rosterIndex(a.name) - rosterIndex(b.name)).map((a) => ({
-      id: a.name, name: identity(a.name).displayName, seat: !!SEATS[a.name],
+      id: a.name, name: identity(a.name).displayName, seat: hasSeat(a.name),
       badge: <StatusBadge status={officeBadge(a.state)} compact title={`${LABEL[a.state]}: ${a.state_reason}`} />, label: LABEL[a.state],
     })),
     { id: CLAUDE_ID, name: "Claude Code CLI", seat: true, badge: <StatusBadge status={toolBadge(data?.claude_tool?.state)} compact title={data?.claude_tool?.detail ?? undefined} />, label: ROBOT_LABEL[robotState(data?.claude_tool?.state)] },

@@ -421,6 +421,10 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text-primar
 .nametag.dim { opacity: 0.6; }
 .nametag.hidden { opacity: 0; }
 .nametag .st { font-weight: 500; color: #A3A9B8; }
+.zonelabel { font-family: var(--font-sans); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #6B7285; white-space: nowrap; pointer-events: none; transition: opacity var(--dur-base); }
+.zonelabel.sign { text-transform: none; letter-spacing: 0; color: #A3A9B8; background: rgba(26, 30, 40, 0.7); padding: 2px 8px; border-radius: var(--radius-pill); }
+.zonelabel.hidden, .desklabel.hidden { opacity: 0; }
+.desklabel { font-family: var(--font-sans); font-size: 11px; font-weight: 500; color: #A3A9B8; background: rgba(26, 30, 40, 0.6); padding: 1px 7px; border-radius: var(--radius-pill); white-space: nowrap; pointer-events: none; opacity: 0.7; }
 .webgl-fallback { padding: var(--space-6); }
 table.simple { border-collapse: collapse; width: 100%; font-size: var(--text-sm); }
 table.simple th { text-align: left; font-weight: 500; color: var(--text-secondary); padding: 8px; border-bottom: 1px solid var(--border-default); }

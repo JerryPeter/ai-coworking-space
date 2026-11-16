@@ -4,16 +4,12 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { GeoCache, Human, Robot, type Character, type HumanState, type RobotState } from "./characters";
-import { buildRoom, SEATS, type Glow, type Room } from "./room";
+import { buildFloor0, buildFloor1, type Floor0, type Floor1, type Glow } from "./room";
+import { hasSeat, PRESETS, type Preset } from "./layout";
 
 const DEG = Math.PI / 180;
 
-export type Preset = "overview" | "workspace" | "lounge";
-const PRESETS: Record<Preset, { pos: [number, number, number]; target: [number, number, number] }> = {
-  overview: { pos: [15, 12, 15], target: [0, 2, 0] },
-  workspace: { pos: [-5, 8, 10], target: [-5, 2, -3] },
-  lounge: { pos: [5, 8, 10], target: [5, 1, -5] },
-};
+export type { Preset };
 
 export interface SceneCharacter { id: string; hex: string; shortName: string; index: number }
 export interface SceneOptions {
@@ -50,7 +46,8 @@ export class OfficeScene {
   private elapsed = 0;
   private raf = 0;
   private active = true;
-  private room: Room;
+  private floor0: Floor0;
+  private floor1: Floor1;
   private geo = new GeoCache();
   private chars = new Map<string, Character>();
   private pickables: THREE.Mesh[] = [];
@@ -96,18 +93,19 @@ export class OfficeScene {
     this.controls.target.set(...p.target);
     Object.assign(this.controls, {
       enableDamping: true, dampingFactor: 0.08, enablePan: false,
-      minPolarAngle: 10 * DEG, maxPolarAngle: 70 * DEG, minDistance: 8, maxDistance: 30,
+      minPolarAngle: 10 * DEG, maxPolarAngle: 80 * DEG, minDistance: 8, maxDistance: 75,
       rotateSpeed: 0.6, zoomSpeed: 0.8,
     });
     this.controls.update();
 
-    // Room
+    // Two floors (Floor 1 group sits at y = FLOOR_H). No grid helper in the new scene.
     opts.characters.forEach((c) => { this.agentHex[c.id] = c.hex; });
-    this.room = buildRoom(this.agentHex);
-    this.scene.add(this.room.staticMesh, this.room.grid, this.room.dynamic);
+    this.floor0 = buildFloor0(this.agentHex);
+    this.floor1 = buildFloor1();
+    this.scene.add(this.floor0.group, this.floor1.group);
 
     // Characters (only profiles that have a seat in the spec layout)
-    opts.characters.filter((c) => SEATS[c.id]).forEach((c) => {
+    opts.characters.filter((c) => hasSeat(c.id)).forEach((c) => {
       const h = new Human({ id: c.id, index: c.index, agentHex: c.hex, reducedMotion: opts.reducedMotion }, this.geo);
       this.chars.set(c.id, h);
       this.scene.add(h.root);
@@ -153,7 +151,7 @@ export class OfficeScene {
 
   private deskTargets = new Map<Glow, THREE.Color>();
   private updateDesk(id: string, state: HumanState) {
-    const d = this.room.desks[id];
+    const d = this.floor0.desks[id];
     if (!d) return;
     const screen = state === "working" ? new THREE.Color(this.agentHex[id]).multiplyScalar(0.6)
       : state === "reviewing" ? new THREE.Color("#F5B83D").multiplyScalar(0.5) : new THREE.Color(0, 0, 0);
@@ -238,7 +236,7 @@ export class OfficeScene {
 
     // Claude bench (spec 7.5): screen + back strip orange while Running; server LEDs blink randomly.
     const running = this.states.get(this.opts.robot.id) === "running";
-    const b = this.room.bench;
+    const b = this.floor0.bench;
     b.screen.mat.emissive.lerp(running ? BENCH_SCREEN : OFF, a);
     b.strip.mat.emissive.lerp(running ? BENCH_STRIP : OFF, a);
     b.leds.forEach((led, i) => {
