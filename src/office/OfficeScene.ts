@@ -5,7 +5,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { GeoCache, Human, Robot, type Character, type HumanState, type RobotState } from "./characters";
 import { buildFloor0, buildFloor1, type Floor0, type Floor1, type Glow } from "./room";
-import { hasSeat, PRESETS, type FloorId, type Preset, type PresetDef } from "./layout";
+import { BALCONY_LIGHT, hasSeat, LIGHT_STATES, PRESETS, SUN_POS, SUN_TARGET, type FloorId, type LightState, type Preset, type PresetDef } from "./layout";
 
 const DEG = Math.PI / 180;
 
@@ -34,6 +34,8 @@ const BENCH_STRIP = new THREE.Color("#F97316");
 
 const TV_STANDBY = new THREE.Color("#1E293B");
 const TV_CYCLE = ["#5B7CFA", "#2DD4BF", "#A78BFA"].map((h) => new THREE.Color(h));
+
+interface LightNow { ambient: THREE.Color; ambientI: number; sun: THREE.Color; sunI: number; balconyI: number }
 
 /** Union of two presets' orbit limits (used while tweening between them). */
 function union(a: PresetDef, b: PresetDef): PresetDef {
@@ -88,6 +90,10 @@ export class OfficeScene {
   private current: Preset = "overview";
   private floorsVisible: [boolean, boolean] = [true, true];
   private occluders: THREE.Mesh[] = [];
+  private ambient: THREE.AmbientLight;
+  private sun: THREE.DirectionalLight;
+  private balcony: THREE.PointLight;
+  private lightTween: { from: LightNow; to: LightNow; t0: number } | null = null;
   private ro: ResizeObserver;
   private firstFrame = false;
   private states = new Map<string, string>();
@@ -110,12 +116,20 @@ export class OfficeScene {
 
     // The scene stays dark in both UI themes.
     this.scene.background = new THREE.Color("#0B0D12");
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-    sun.position.set(10, 20, 10);
-    sun.target.position.set(0, 0, 0);
-    sun.castShadow = false;
-    this.scene.add(sun, sun.target);
+    // Lights (max 3, no shadows): ambient + sun follow the preset's mood (spec 8.1); a warm point light
+    // over the balcony stands in for the outdoor sky glow. All three tween with the camera.
+    const L = LIGHT_STATES.overview;
+    this.ambient = new THREE.AmbientLight(L.ambient, L.ambientI);
+    this.sun = new THREE.DirectionalLight(L.sun, L.sunI);
+    this.sun.position.set(...SUN_POS);
+    this.sun.target.position.set(...SUN_TARGET);
+    this.sun.castShadow = false;
+    this.balcony = new THREE.PointLight(BALCONY_LIGHT.color, L.balconyI, BALCONY_LIGHT.distance, 0); // decay 0: smooth fade to 0 at 18 u
+    this.balcony.position.set(...BALCONY_LIGHT.pos);
+    this.balcony.castShadow = false;
+    this.ambient.name = "ambient"; this.sun.name = "sun"; this.balcony.name = "balcony-light";
+    this.scene.add(this.ambient, this.sun, this.sun.target, this.balcony);
+    this.onPresetLights = (name) => this.tweenLights(LIGHT_STATES[name]);
 
     // Camera + orbit controls (pan stays off; limits come from the active preset)
     const p = PRESETS.overview;
@@ -264,8 +278,26 @@ export class OfficeScene {
   /** Floors currently shown (for tests / UI). */
   get visibleFloors(): [boolean, boolean] { return [...this.floorsVisible] as [boolean, boolean]; }
 
-  /** Hook for the light-state tween (task 7). */
+  /** Light state follows the preset (set in the constructor). */
   private onPresetLights?: (p: Preset) => void;
+
+  private lightNow(): LightNow {
+    return { ambient: this.ambient.color.clone(), ambientI: this.ambient.intensity, sun: this.sun.color.clone(), sunI: this.sun.intensity, balconyI: this.balcony.intensity };
+  }
+
+  private tweenLights(to: LightState) {
+    const target: LightNow = { ambient: new THREE.Color(to.ambient), ambientI: to.ambientI, sun: new THREE.Color(to.sun), sunI: to.sunI, balconyI: to.balconyI };
+    if (this.opts.reducedMotion) { this.applyLight(target, target, 1); return; }
+    this.lightTween = { from: this.lightNow(), to: target, t0: performance.now() };
+  }
+
+  private applyLight(a: LightNow, b: LightNow, e: number) {
+    this.ambient.color.lerpColors(a.ambient, b.ambient, e);
+    this.ambient.intensity = a.ambientI + (b.ambientI - a.ambientI) * e;
+    this.sun.color.lerpColors(a.sun, b.sun, e);
+    this.sun.intensity = a.sunI + (b.sunI - a.sunI) * e;
+    this.balcony.intensity = a.balconyI + (b.balconyI - a.balconyI) * e;
+  }
 
   // ---------------- lifecycle ----------------
   setActive(a: boolean) {
@@ -306,6 +338,12 @@ export class OfficeScene {
       this.controls.target.lerpVectors(tw.fromT, tw.toT, e);
       if (p >= 0.5 && tw.onHalf) { tw.onHalf(); tw.onHalf = undefined; }
       if (p >= 1) { this.tween = null; this.controls.enabled = true; tw.onDone?.(); }
+    }
+    if (this.lightTween) {
+      const lt = this.lightTween;
+      const p = Math.min(1, (performance.now() - lt.t0) / TWEEN_MS);
+      this.applyLight(lt.from, lt.to, easeInOutCubic(p));
+      if (p >= 1) this.lightTween = null;
     }
     this.controls.update();
 
