@@ -1,7 +1,7 @@
 // 3D Office (spec 6.7 + 7). Lazy-loaded so only this view pays for Three.js.
 // Polls /api/office/state every 5 s. Characters only show "working" when the API says so
 // (a real kanban claim); today everyone is idle, which is correct.
-import { Moon, Sun } from "lucide-react";
+import { Box, Grid3x3, Moon, Sun } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { endpoints, useApi } from "../api/client";
 import type { OfficeState, ToolState } from "../api/types";
@@ -14,7 +14,9 @@ import { relative, useNow } from "../lib/time";
 import { OfficeScene, webglAvailable, type Preset } from "../office/OfficeScene";
 import { hasSeat, loungeSpotFor } from "../office/layout";
 import type { RobotState } from "../office/characters";
-import { readTod, store, TOD_KEY, type TimeOfDay } from "../office/palettes";
+import { MODE_KEY, readMode, readTod, store, TOD_KEY, type OfficeMode, type TimeOfDay } from "../office/palettes";
+import { PixelOfficeScene } from "../office/PixelOfficeScene";
+import type { OfficeRenderer } from "../office/types";
 import { AGENTS, CLAUDE, CLAUDE_ID, identity, rosterIndex } from "../theme/agents";
 
 const LABEL: Record<OfficeState, string> = { working: "Working", reviewing: "Reviewing", idle: "Idle", offline: "Offline", unknown: "Unknown" };
@@ -28,38 +30,48 @@ export default function Office() {
   const { params } = useRoute();
   const now = useNow(5_000);
   const host = useRef<HTMLDivElement>(null);
-  const scene = useRef<OfficeScene | null>(null);
+  const scene = useRef<OfficeRenderer | null>(null);
   const [ready, setReady] = useState(false);
   const [gl] = useState(webglAvailable);
   const [preset, setPreset] = useState<Preset>("overview");
+  const [voxelError, setVoxelError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const [tod, setTod] = useState<TimeOfDay>(readTod);
-  const todRef = useRef(tod);
-  todRef.current = tod;
+  const [modePref, setModePref] = useState<OfficeMode>(readMode);
+  // No WebGL (or the 3D scene failed to start) → Pixel Office, which only needs Canvas 2D (tech plan D4).
+  const voxelOk = gl && !voxelError;
+  const mode: OfficeMode = voxelOk ? modePref : "pixel";
+  // Latest UI state for a freshly mounted renderer, read without re-running the mount effect.
+  const ui = useRef({ tod, preset });
+  ui.current = { tod, preset };
   const focusParam = params.get("focus");
 
-  // Mount / unmount the Three.js scene with the view (render loop stops on unmount).
+  // Mount ONE renderer for the active mode; switching mode disposes the old one first (Option B,
+  // the same cleanup path that runs on every view navigation). The host div is keyed per mode.
   useEffect(() => {
-    if (!gl || !host.current) return;
+    if (!host.current) return;
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    let s: OfficeScene;
+    const opts = {
+      characters: AGENTS.map((a) => ({ id: a.id, hex: a.hex, shortName: a.shortName, index: rosterIndex(a.id) })),
+      robot: { id: CLAUDE_ID, hex: CLAUDE.hex, shortName: CLAUDE.shortName, index: rosterIndex(CLAUDE_ID) },
+      onSelect: (id: string) => setParams({ agent: id, tab: null }),
+      onFirstFrame: () => setReady(true),
+      onPresetChange: setPreset,
+      reducedMotion,
+    };
+    let s: OfficeRenderer;
     try {
-      s = new OfficeScene(host.current, {
-        characters: AGENTS.map((a) => ({ id: a.id, hex: a.hex, shortName: a.shortName, index: rosterIndex(a.id) })),
-        robot: { id: CLAUDE_ID, hex: CLAUDE.hex, shortName: CLAUDE.shortName, index: rosterIndex(CLAUDE_ID) },
-        onSelect: (id) => setParams({ agent: id, tab: null }),
-        onFirstFrame: () => setReady(true),
-        onPresetChange: setPreset,
-        reducedMotion,
-      });
+      s = mode === "voxel" ? new OfficeScene(host.current, opts) : new PixelOfficeScene(host.current, opts);
     } catch (e) {
-      setInitError((e as Error).message);
+      if (mode === "voxel") setVoxelError((e as Error).message);
+      else setInitError((e as Error).message);
       return;
     }
     scene.current = s;
-    s.setTimeOfDay(todRef.current, { instant: true }); // persisted choice, no tween on first paint
-    return () => { s.dispose(); scene.current = null; };
-  }, [gl]);
+    s.setTimeOfDay(ui.current.tod, { instant: true }); // persisted choice, no tween on first paint
+    if (ui.current.preset !== "overview") s.preset(ui.current.preset); // keep the floor across mode switches
+    return () => { s.dispose(); scene.current = null; setReady(false); };
+  }, [mode]);
 
   const toggleTod = () => {
     const next: TimeOfDay = tod === "day" ? "night" : "day";
@@ -67,13 +79,18 @@ export default function Office() {
     store(TOD_KEY, next);
     scene.current?.setTimeOfDay(next);
   };
+  const switchMode = (m: OfficeMode) => {
+    if (m === mode) return;
+    setModePref(m);
+    store(MODE_KEY, m);
+  };
 
-  // Push API state into the scene.
+  // Push API state into the scene (re-runs on `ready`, so a newly mounted renderer gets it at once).
   const data = office.data;
   useEffect(() => {
     const s = scene.current;
     if (!s || !data) return;
-    data.agents.forEach((a) => s.setAgentState(a.name, a.state, LABEL[a.state] ?? "Unknown"));
+    data.agents.forEach((a) => s.setAgentState(a.name, a.state, LABEL[a.state] ?? "Unknown", a.last_activity || a.current_task?.title || null));
     const rs = robotState(data.claude_tool?.state);
     s.setRobotState(rs, ROBOT_LABEL[rs]);
   }, [data, ready]);
@@ -97,10 +114,10 @@ export default function Office() {
     { id: CLAUDE_ID, name: "Claude Code CLI", seat: true, badge: <StatusBadge status={toolBadge(data?.claude_tool?.state)} compact title={data?.claude_tool?.detail ?? undefined} />, label: ROBOT_LABEL[robotState(data?.claude_tool?.state)] },
   ];
 
-  if (!gl || initError) {
+  if (initError) {
     return (
       <div className="webgl-fallback stack">
-        <ErrorPanel what="the 3D view" error={new Error(initError ?? "3D view needs WebGL, which isn't available in this browser")} />
+        <ErrorPanel what="the office view" error={new Error(initError)} />
         <div className="card" style={{ overflow: "hidden" }}>
           <table className="simple">
             <thead><tr><th>Agent</th><th>Zone</th><th>Status</th><th>Reason</th></tr></thead>
@@ -131,8 +148,15 @@ export default function Office() {
   return (
     <div className="office">
       <div className="office-frame">
-        <div ref={host} className={`office-canvas${ready ? " ready" : ""}`} />
+        <div key={mode} ref={host} className={`office-canvas ${mode}${ready ? " ready" : ""}`} />
         <div className="ov ov-tl">
+          <div className="segmented" role="radiogroup" aria-label="Office graphics">
+            <button className="icon" role="radio" aria-checked={mode === "voxel"} aria-pressed={mode === "voxel"} aria-label="Voxel 3D"
+              disabled={!voxelOk} title={voxelOk ? "Voxel 3D" : "3D needs WebGL, which isn't available here"} onClick={() => switchMode("voxel")}><Box size={16} /></button>
+            <button className="icon" role="radio" aria-checked={mode === "pixel"} aria-pressed={mode === "pixel"} aria-label="Pixel Office"
+              title="Pixel Office" onClick={() => switchMode("pixel")}><Grid3x3 size={16} /></button>
+          </div>
+          <span className="ov-sep" aria-hidden="true" />
           <div className="segmented" role="radiogroup" aria-label="Time of day">
             <button className="icon tod-day" role="radio" aria-checked={tod === "day"} aria-pressed={tod === "day"} aria-label="Day" title="Day mode"
               onClick={() => tod !== "day" && toggleTod()}><Sun size={16} /></button>
