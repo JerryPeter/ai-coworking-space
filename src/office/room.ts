@@ -201,7 +201,7 @@ export function buildStairs(b: StaticBatch) {
     const top = rise * (i + 1);
     const zc = frontZ - tread * i - tread / 2;
     b.box(width, top, tread, x, top / 2, zc, i % 2 ? "#343C4D" : "#3A4356");          // solid stacked block
-    b.box(width, 0.04, 0.08, x, top + 0.01, frontZ - tread * i - 0.04, "#4A5A8A");   // nosing strip
+    b.box(width, 0.04, 0.08, x, top - 0.015, frontZ - tread * i - 0.035, "#4A5A8A"); // nosing strip, flush with the tread
   }
   b.box(0.12, 0.6, run, -17.1, 3.0, midZ, "#2E3444", [slope, 0, 0]);                 // open-side stringer
   for (const i of [1, 4, 7, 10, 11]) b.box(0.1, 2.0, 0.1, -17.25, rise * (i + 1) + 1.0, frontZ - tread * i - tread / 2, "#4A5266");
@@ -319,7 +319,7 @@ export function buildFloor0(agentHex: Record<string, string>): Floor0 {
   b.box(11.8, 0.02, 14.8, -14, 0.01, 6.5, "#181D29");
   b.box(0.8, 1.6, 0.8, -10, 0.8, 12, "#6B7285");             // water cooler
   b.box(0.6, 0.7, 0.6, -10, 1.95, 12, "#7DD3FC");
-  plant(b, -9.5, 1.5, 1.0);
+  plant(b, -11.0, 1.5, 1.0);   // spec (-9.5, 1.5) brushes the (-7,-1) → HUB0 walking diagonal
   plant(b, -12.0, 13.2, 0.8);
   buildStairs(b);
 
@@ -396,9 +396,10 @@ export function buildFloor1(): Floor1 {
   // ---- B. Balcony ----
   b.box(8.0, 0.04, 28, 16, 0.02, 0, "#3A3128");
   for (let x = 13; x <= 19; x++) b.box(0.08, 0.045, 28, x, 0.0225, 0, "#2E2620");
-  // Frame wall at x = 12 with doorways z[0,3] and z[8,11]
-  for (const z of [-14, -12, -10, -8, -6, -4, -2, 0, 3, 5.5, 8, 11, 12.5, 14]) b.box(0.2, 4.0, 0.2, 12, 2.0, z, "#3D4559");
-  b.box(0.2, 0.2, 28, 12, 4.0, 0, "#3D4559");
+  // Frame wall at x = 12 with doorways z[0,3] and z[8,11]. Spec puts the beam at 4.0, but characters
+  // are ~5.1 tall and walk through these doors, so the frame (and string lights) is raised to 5.6.
+  for (const z of [-14, -12, -10, -8, -6, -4, -2, 0, 3, 5.5, 8, 11, 12.5, 14]) b.box(0.2, 5.6, 0.2, 12, 2.8, z, "#3D4559");
+  b.box(0.2, 0.2, 28, 12, 5.6, 0, "#3D4559");
   b.box(0.25, 0.3, 14, 12, 0.15, -7, "#3D4559");
   b.box(0.25, 0.3, 5, 12, 0.15, 5.5, "#3D4559");
   b.box(0.25, 0.3, 3, 12, 0.15, 12.5, "#3D4559");
@@ -407,8 +408,8 @@ export function buildFloor1(): Floor1 {
   railing(b, "x", -13.85, 12, 20, "#7A5A3C");
   railing(b, "x", 13.85, 12, 20, "#7A5A3C");
   // String lights along the frame-wall beam
-  b.box(0.02, 0.02, 28, 12.15, 3.9, 0, "#1F2937");
-  for (let z = -13; z <= 13; z += 2) b.box(0.12, 0.12, 0.12, 12.15, 3.8, z, "#F5C542");
+  b.box(0.02, 0.02, 28, 12.15, 5.5, 0, "#1F2937");
+  for (let z = -13; z <= 13; z += 2) b.box(0.12, 0.12, 0.12, 12.15, 5.4, z, "#F5C542");
   // Planters
   for (const z of [-10.5, 10.0]) {
     b.box(0.9, 0.8, 3.0, 19.2, 0.4, z, "#4A3826");

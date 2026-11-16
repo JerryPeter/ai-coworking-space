@@ -43,13 +43,19 @@ export const STAIR = {
   x: -18.45,
   steps: 12, rise: 0.5, tread: 0.7, width: 2.6,
   frontZ: 12.4,                 // front face of step 0
-  bottomZ: 13.1,                // STAIR.bottom (y 0)
-  upperZ: 4.7,                  // STAIR.upper (y 6, top step)
+  // Spec STAIR.bottom/upper are z 13.1 / 4.7 (the walk line touches every nosing exactly). Shifted 0.1
+  // forward so the feet clear each nosing by ~0.07 and a leg corner can't graze step 0 mid-turn.
+  bottomZ: 13.2,                // STAIR.bottom (y 0)
+  upperZ: 4.8,                  // STAIR.upper (y 6, top step)
   topZ: 3.4,                    // STAIR.top (y 6, on the slab)
-  lanes: [-19.05, -18.65, -18.25, -17.85], // per roster index (spec 6.2)
+  // Per roster index. Spec 6.2 lanes (-19.05..-17.85) put the outer agents' arms (character is 2.0
+  // wide arm-to-arm) through the left wall (x -20) or the handrail (x -17.25). These stay clear.
+  lanes: [-18.8, -18.65, -18.5, -18.35],
 };
 export const stairLane = (index: number) => STAIR.lanes[index] ?? STAIR.x;
-export const HUB0: XZ = [-15.8, 12.6];   // floor 0 stair approach
+// Floor 0 stair approach. Spec (-15.8, 12.6) makes the body brush the low ends of the stringer and
+// handrail (z ≈ 12.4–12.6) on the diagonal into the lane; z 13.4 turns onto the stair in front of them.
+export const HUB0: XZ = [-15.8, 13.4];
 export const HUB1: XZ = [-15.0, 2.0];    // floor 1 landing hub
 
 /** Floor-0 route from a desk to the stair foot (spec 6.3), excluding the stair itself. */
@@ -132,7 +138,8 @@ export function deskToLounge(id: string, index: number): [number, number, number
   const lane = stairLane(index);
   const spot = loungeSpotFor(id);
   const f0 = deskToStair(id).map(([x, z]) => [x, 0, z] as [number, number, number]);
-  const climb: [number, number, number][] = [[lane, 0, STAIR.bottomZ], [lane, FLOOR_H, STAIR.upperZ], [lane, FLOOR_H, STAIR.topZ]];
+  // (lane, HUB0.z) lines the walker up with its lane before the climb, so the turn finishes in front of step 0.
+  const climb: [number, number, number][] = [[lane, 0, HUB0[1]], [lane, 0, STAIR.bottomZ], [lane, FLOOR_H, STAIR.upperZ], [lane, FLOOR_H, STAIR.topZ]];
   const f1 = [HUB1, ...spot.approach, [spot.x, spot.z] as XZ].map(([x, z]) => [x, FLOOR_H, z] as [number, number, number]);
   return [...f0, ...climb, ...f1];
 }
