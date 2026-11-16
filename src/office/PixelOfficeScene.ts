@@ -10,7 +10,7 @@ import { DESKS, hasSeat, loungeSpotFor, type FloorId, type Preset } from "./layo
 import type { SceneOptions } from "./OfficeScene";
 import { darken, lighten, mixHex, PIXEL_PALETTES, STATUS_DOT, type PixelPalette, type TimeOfDay } from "./palettes";
 import { drawHuman, drawQuestion, drawRobot, drawShadow, drawZs, lookFor, type Anim } from "./pixel-characters";
-import { fillPoly, isoBox, isoTile, wallCol, wallQuad, type Ctx } from "./pixel-draw";
+import { fillPoly, isoBox, isoGlow, isoTile, rgba as rgbaHex, wallCol, wallQuad, type Ctx } from "./pixel-draw";
 import {
   BENCH_GRID, BUF_H, BUF_W, deskSpot, FLOOR_TILES, GRID_D, GRID_W, isoProject, loungePixelSpot, ROBOT_SPOT, STAIR_GRID,
   WALL_H, WALL_ITEMS, WALL_T, WALLS, type PixelSpot, type TileKind, type WallItem,
@@ -264,6 +264,13 @@ export class PixelOfficeScene implements OfficeRenderer {
     }
     if (f === 1) this.drawStairwell(ctx);
 
+    // Layer 2 — floor decals: daylight spill in front of the back-left windows (day only)
+    if (p.windowSpill) {
+      for (const it of WALL_ITEMS[f]) {
+        if (it.kind === "window" && it.wall === "l") fillPoly(ctx, [P(0, it.u0), P(2, it.u0 + 0.5), P(2, it.u1 + 0.5), P(0, it.u1)], p.windowSpill);
+      }
+    }
+
     // Layer 3 — back walls with windows, curtains, shelves, whiteboard/TV
     this.drawWalls(ctx, f);
     drawWallFurniture(ctx, p, f);
@@ -272,6 +279,10 @@ export class PixelOfficeScene implements OfficeRenderer {
     const set = this.furnitureFor(f);
     for (const it of set.items) it.draw(ctx);
     drawBulbs(ctx, p, set.bulbs);
+
+    // Layer 6 (static part) — night lamp glow: radial gradient on each lit shade, #FFB347 @ 40 % → transparent,
+    // radius 3 tiles for desk lamps (floor lamp 2.5, side-table lamps 1.5).
+    if (p.lampPool) for (const l of set.lights) isoGlow(ctx, l.x, l.y, l.radius, p.lampPool, 0.4);
   }
 
   private furnitureFor(f: FloorId) {
@@ -301,8 +312,14 @@ export class PixelOfficeScene implements OfficeRenderer {
         const st = this.agents.get(id)?.state, pts = crtScreen(g);
         const col = st === "working" ? mixHex(this.agentHex[id] ?? "#6B7285", "#000000", 0.15)
           : st === "reviewing" ? "#F5B83D" : st === "offline" ? "#111111" : p.crtScreenOff;
+        const lit = st === "working" || st === "reviewing";
+        if (lit && this.tod === "night") {
+          // CRT glow: 2 px ring in the screen colour at 35 % + a 1-tile pool on the desk/floor
+          isoGlow(ctx, (pts[0].x + pts[2].x) / 2, (pts[0].y + pts[2].y) / 2 + 10, 1, col, 0.18);
+          fillPoly(ctx, [{ x: pts[0].x - 2, y: pts[0].y - 2 }, { x: pts[1].x + 2, y: pts[1].y - 2 }, { x: pts[2].x + 2, y: pts[2].y + 2 }, { x: pts[3].x - 2, y: pts[3].y + 2 }], rgbaHex(col, 0.35));
+        }
         fillPoly(ctx, pts, col);
-        if (st === "working" || st === "reviewing") {
+        if (lit) {
           fillPoly(ctx, pts.map((q) => ({ x: q.x, y: q.y + 1 })), "rgba(0, 0, 0, 0.25)", 2); // scanlines
           if (st === "working" && (rm || t % 10 < 5)) { ctx.fillStyle = "#FFFFFF"; ctx.fillRect(pts[3].x + 1, pts[3].y - 2, 1, 1); }
         } else if (st !== "offline") {
@@ -330,6 +347,7 @@ export class PixelOfficeScene implements OfficeRenderer {
       // TV: slow hard-swap colour cycle while someone watches, standby otherwise (spec 2.4)
       const watching = [...this.agents.entries()].some(([id, a]) => a.state === "idle" && hasSeat(id) && loungeSpotFor(id).zone === "tv");
       const col = watching ? TV_CYCLE[rm ? 0 : Math.floor(t / 20) % 3] : "#1E293B";
+      if (watching && this.tod === "night") isoGlow(ctx, P(1.6, 3.5).x, P(1.6, 3.5).y, 2, col, 0.15); // TV glow pool on the rug
       wallQuad(ctx, "l", 0, 2.45 + 2 / 16, 4.55 - 2 / 16, 1.95, 3.55, col);
       if (watching) {
         wallQuad(ctx, "l", 0, 3.0, 3.2, 2.4, 2.65, "#FFFFFF");

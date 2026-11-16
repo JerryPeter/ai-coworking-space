@@ -97,3 +97,26 @@ export function pixelEllipse(ctx: Ctx, cx: number, cy: number, rx: number, ry: n
 
 /** Half extents of one tile in buffer px (for callers that offset by tile fractions). */
 export const HALF_W = BT_W / 2, HALF_H = BT_H / 2;
+
+/** "#RRGGBB" + alpha → rgba() string. */
+export function rgba(hex: string, a: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+/** Night light pool: radial gradient squashed onto the iso floor plane (2:1), inner colour at `alpha`,
+ *  fading to transparent at `radiusTiles`. Drawn in the low-res buffer, so the upscale makes it stepped. */
+export function isoGlow(ctx: Ctx, x: number, y: number, radiusTiles: number, color: string, alpha: number) {
+  const r = radiusTiles * HALF_W * Math.SQRT2;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1, 0.5);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+  g.addColorStop(0, rgba(color, alpha));
+  g.addColorStop(1, rgba(color, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
