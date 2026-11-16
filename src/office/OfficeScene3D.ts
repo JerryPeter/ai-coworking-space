@@ -1040,7 +1040,11 @@ export class OfficeScene3D {
       if (a === this.selected) b.setAttribute("aria-current", "true");
       const av = el("span", "o3d-avatar"); av.style.background = a.data.color;
       const st = el("i"); st.style.background = STATUS[a.data.status].color; av.appendChild(st);
-      const who = el("span", "o3d-who"); who.appendChild(el("span", "truncate", a.data.name));
+      const oc = a.data.id.startsWith("openclaw:");
+      const fw = el("span", "o3d-fw " + (oc ? "badge-openclaw" : "badge-hermes"), oc ? "OC" : "H");
+      fw.title = oc ? "OpenClaw agent" : "Hermes agent";
+      const nm = el("span", "o3d-name"); nm.append(el("span", "truncate", a.data.name), fw);
+      const who = el("span", "o3d-who"); who.appendChild(nm);
       const sm = el("small", "", STATUS[a.data.status].label); sm.style.color = STATUS[a.data.status].color; who.appendChild(sm);
       b.append(av, who, el("span", "o3d-where", this.locText(a)));
       b.addEventListener("click", () => { this.select(a.data.id); this.opts.onSelect?.(a.data.id); });

@@ -486,3 +486,25 @@ table.simple td { padding: 8px; border-bottom: 1px solid var(--border-subtle); }
 
 /* Tooltip (title attr fallback is used broadly; this is for richer tips) */
 [data-tip] { position: relative; }
+
+/* ============ Framework badges (Hermes / OpenClaw) ============ */
+.badge-hermes { background: var(--accent-primary-subtle); color: var(--accent-primary); border: 1px solid color-mix(in srgb, var(--accent-primary) 35%, transparent); }
+.badge-openclaw { background: rgba(249, 115, 22, 0.14); color: #F97316; border: 1px solid rgba(249, 115, 22, 0.35); }
+.fw-wrap { position: relative; display: flex; flex-direction: column; }
+.fw-wrap > .agent-card { flex: 1; }
+.fw-badge {
+  position: absolute; top: -9px; right: 14px; z-index: 1; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; line-height: 14px;
+  padding: 1px 6px 1px 3px; border-radius: 4px; letter-spacing: 0.02em; backdrop-filter: blur(6px);
+  transition: transform var(--dur-fast);
+}
+/* The pill sits on the card's top border; give it an opaque base so the border line doesn't show through. */
+.fw-badge::before { content: ""; position: absolute; inset: -1px; z-index: -1; border-radius: inherit; background: var(--bg-surface); }
+.fw-mono { font-size: 9px; line-height: 12px; padding: 0 3px; border-radius: 3px; color: #fff; }
+.badge-hermes .fw-mono { background: var(--accent-primary); }
+.badge-openclaw .fw-mono { background: #F97316; }
+.fw-wrap:hover > .fw-badge { transform: translateY(-1px); }
+.fw-wrap:has(> .agent-card:active) > .fw-badge { transform: none; }
+.o3d-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.o3d-name > .truncate { min-width: 0; }
+.o3d-fw { flex: none; font-size: 10px; font-weight: 700; line-height: 14px; padding: 1px 5px; border-radius: 4px; }

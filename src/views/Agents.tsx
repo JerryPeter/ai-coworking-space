@@ -1,5 +1,5 @@
 // Agents roster (spec 6.2): fixed hierarchy order, the tool card always last.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { endpoints, refetch, useApi } from "../api/client";
 import { AgentCard, OpenClawCard, ToolCard } from "../components/agents/AgentCard";
 import { ErrorPanel, Skeleton } from "../components/ui/States";
@@ -8,6 +8,17 @@ import { useTeam } from "../lib/team";
 import { useNow } from "../lib/time";
 
 type Filter = "all" | "agents" | "tools";
+type Framework = "hermes" | "openclaw";
+
+// Framework badge, overlaid on the card's top-right edge so the card component itself stays untouched.
+function FrameworkBadge({ fw }: { fw: Framework }) {
+  return fw === "hermes"
+    ? <span className="fw-badge badge-hermes" title="Hermes agent"><span className="fw-mono" aria-hidden="true">H</span>Hermes</span>
+    : <span className="fw-badge badge-openclaw" title="OpenClaw agent"><span className="fw-mono" aria-hidden="true">OC</span>OpenClaw</span>;
+}
+function WithFramework({ fw, children }: { fw: Framework; children: ReactNode }) {
+  return <div className="fw-wrap">{children}<FrameworkBadge fw={fw} /></div>;
+}
 
 export default function Agents() {
   const team = useTeam();
@@ -34,8 +45,8 @@ export default function Agents() {
         <div className="agent-grid">
           {filter !== "tools" && (team.loading && !n
             ? [0, 1, 2, 3].map((i) => <Skeleton key={i} h={232} r={12} />)
-            : team.members.map((m) => <AgentCard key={m.id} m={m} now={now} />))}
-          {filter !== "agents" && <ToolCard tool={team.tool} loading={team.tools.loading} now={now} />}
+            : team.members.map((m) => <WithFramework key={m.id} fw="hermes"><AgentCard m={m} now={now} /></WithFramework>))}
+          {filter !== "agents" && <WithFramework fw="hermes"><ToolCard tool={team.tool} loading={team.tools.loading} now={now} /></WithFramework>}
         </div>
       )}
       {filter !== "tools" && (
@@ -49,7 +60,7 @@ export default function Agents() {
             <div className="agent-grid">
               {!oc.data
                 ? [0, 1, 2, 3].map((i) => <Skeleton key={i} h={232} r={12} />)
-                : oc.data.agents.map((a) => <OpenClawCard key={a.name} a={a} now={now} />)}
+                : oc.data.agents.map((a) => <WithFramework key={a.name} fw="openclaw"><OpenClawCard a={a} now={now} /></WithFramework>)}
             </div>
           )}
           {oc.data && !oc.data.available && <div className="sm muted">OpenClaw config unavailable: {oc.data.error}</div>}
