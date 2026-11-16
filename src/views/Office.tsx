@@ -1,6 +1,7 @@
 // 3D Office (spec 6.7 + 7). Lazy-loaded so only this view pays for Three.js.
 // Polls /api/office/state every 5 s. Characters only show "working" when the API says so
 // (a kanban claim, or a live session lease with activity < 10 min ago; see state_source).
+// TODO Phase 2: add OpenClaw team to 3D office (needs desk layout from Susi)
 import { Box, Grid3x3, Moon, Sun } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { endpoints, useApi } from "../api/client";

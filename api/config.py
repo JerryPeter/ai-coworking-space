@@ -24,5 +24,9 @@ if BIND_HOST != "127.0.0.1":
 # inside an agent session would treat one profile as the root and see only "default".
 HERMES_HOME: Path = Path(os.getenv("MISSION_CONTROL_V2_HERMES_ROOT", str(Path.home() / ".hermes")))
 
+# Read-only OpenClaw data root (never written to). Contains live secrets: only allowlisted fields
+# are ever read from it (see api/sources/openclaw.py).
+OPENCLAW_HOME: Path = Path(os.getenv("MISSION_CONTROL_V2_OPENCLAW_ROOT", str(Path.home() / ".openclaw")))
+
 # Production frontend (Vite build output). Served at / only if it exists.
 FRONTEND_DIST: Path = PROJECT_ROOT / "dist"

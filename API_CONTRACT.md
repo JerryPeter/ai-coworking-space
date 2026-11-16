@@ -421,6 +421,38 @@ interface Skill {
 
 ---
 
+## 11b. `GET /api/openclaw/agents`, `GET /api/openclaw/agents/{name}`
+
+Auth: yes. Read-only OpenClaw team (plan `docs/sync-fix-and-openclaw-plan.md` section 2).
+Sources: `~/.openclaw/openclaw.json` (`agents.entries` + `agents.defaults.model` only),
+`~/.openclaw/state/openclaw.sqlite` (`state_leases` gateway-owner pid/startedAt/expires_at,
+`audit_events` agent_run occurred_at), `~/.openclaw/agents/<id>/agent/openclaw-agent.sqlite`
+(`COUNT(session_id)` of `session_windows`). Column allowlists only; never transcripts, session keys,
+tokens or keys. The built-in `openclaw` system agent is not exposed (404). Unknown name: 404.
+
+```ts
+interface OpenClawAgentsResponse {
+  agents: OpenClawAgent[];                     // config order: chief, researcher, writer, reviewer
+  count: number;
+  gateway: "running" | "stopped" | "unknown";  // one shared gateway: lease + /proc starttime + expiry
+  gateway_detail: string;
+  available: boolean; error: string | null;    // openclaw.json readable
+  source: string;
+}
+interface OpenClawAgent {
+  name: string; display_name: string; emoji: string | null; theme: string | null;
+  model: string | null;                        // provider prefix + @auth-profile suffix stripped
+  model_inherited: boolean;                    // true = agents.defaults.model
+  can_delegate_to: string[];
+  gateway_status: "running" | "stopped" | "unknown";
+  last_run_at: ISODate | null;                 // MAX(audit_events.occurred_at ms) for kind=agent_run
+  is_running: false;                           // phase 1: always false until validated on a live run
+  session_count: number;                       // 0 if the agent DB is missing
+  error: string | null;
+}
+```
+`/agents/{name}` returns `{ agent: OpenClawAgent, source }`.
+
 ## 12. Not in the API yet (gaps vs. Susi's design spec)
 
 These are honest gaps. Show "Not available" in the UI until a backend endpoint exists.

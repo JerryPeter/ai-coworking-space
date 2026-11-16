@@ -1,7 +1,7 @@
 // Agent card (spec 5.2), Claude tool card variant, and the compact team-strip card (6.1).
 import { ChevronRight, Clock, Moon } from "lucide-react";
 import { endpoints, useApi } from "../../api/client";
-import type { Tool } from "../../api/types";
+import type { OpenClawAgent, Tool } from "../../api/types";
 import { officeBadge, toolBadge } from "../../lib/derive";
 import { setParams, useRoute } from "../../lib/router";
 import type { TeamMember } from "../../lib/team";
@@ -97,6 +97,49 @@ export function ToolCard({ tool, loading, now }: { tool: Tool | undefined; loadi
       <div className="agent-foot">
         <span className="truncate" title={tool?.detail ?? undefined}>{tool?.detail ?? "No runs recorded"}</span>
         <ChevronRight size={16} className="chev" />
+      </div>
+    </div>
+  );
+}
+
+// OpenClaw team card (plan 2.3): reduced field set, read-only, not clickable (no drawer yet).
+// Hermes-only fields are shown as an explicit "Not Available".
+const GW_BADGE = { running: "online", stopped: "offline", unknown: "unknown" } as const;
+
+export function OpenClawCard({ a, now }: { a: OpenClawAgent; now: number }) {
+  return (
+    <div className="agent-card" style={{ ["--agent-c" as string]: "var(--border-strong)", cursor: "default" }}
+      aria-label={`${a.display_name} (OpenClaw), gateway ${a.gateway_status}`}>
+      <div className="agent-head">
+        <div aria-hidden="true" style={{ width: 56, height: 56, borderRadius: 10, display: "grid", placeItems: "center",
+          fontSize: 30, background: "var(--bg-inset)" }}>{a.emoji ?? "?"}</div>
+        <div className="agent-namebox">
+          <div className="agent-name truncate" title={a.display_name}>{a.display_name} <span className="tool-tag">OPENCLAW</span></div>
+          <div className="sm secondary">{a.theme ?? "Not Available"}</div>
+          <div className="mono-12 muted">{a.name}</div>
+        </div>
+        <StatusBadge status={GW_BADGE[a.gateway_status] ?? "unknown"} label={`Gateway ${a.gateway_status}`}
+          title="Shared OpenClaw gateway (state_leases + /proc); all team agents share it" />
+      </div>
+      <div className="row" style={{ flexWrap: "wrap" }}>
+        {a.model ? <span className="meta-chip" title="Configured model">{a.model}</span> : <span className="meta-chip muted">model: Not Available</span>}
+        <span className="xs muted">{a.model_inherited ? "(default)" : "configured"}</span>
+        {a.is_running
+          ? <StatusBadge status="running" label="Running" />
+          : <StatusBadge status="not_running" title="Phase 1: live-run detection is disabled until validated" />}
+      </div>
+      <div className="agent-stats">
+        <Stat v={a.session_count} l="Sessions" />
+        <Stat v={null} l="Skills" title="OpenClaw does not expose a skill count" />
+        <Stat v={null} l="Memory" title="Not read from OpenClaw" />
+      </div>
+      <div className="agent-stats">
+        <Stat v={null} l="Cron jobs" title="Not read from OpenClaw in phase 1" />
+        <Stat v={null} l="Session leases" title="OpenClaw has no per-agent session lease" />
+        <Stat v={a.can_delegate_to.length ? a.can_delegate_to.length : "—"} l="Delegates to" title={a.can_delegate_to.join(", ") || "none"} />
+      </div>
+      <div className="agent-foot">
+        <Clock size={14} /> <span>Last run <RelTime t={a.last_run_at} now={now} fallback="Never" /></span>
       </div>
     </div>
   );

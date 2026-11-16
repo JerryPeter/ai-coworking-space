@@ -6,7 +6,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type {
   AgentsResponse, CronJobsResponse, CronRunsResponse, DashboardSummary, KanbanResponse,
-  MemoryResponse, OfficeStateResponse, SessionsResponse, SkillsResponse, ToolsResponse,
+  MemoryResponse, OfficeStateResponse, OpenClawAgentsResponse, SessionsResponse, SkillsResponse, ToolsResponse,
 } from "./types";
 
 const TOKEN_KEY = "mc.token";
@@ -90,6 +90,7 @@ export const endpoints = {
   agents: "/api/agents",
   tools: "/api/agents/tools",
   office: "/api/office/state",
+  openclaw: "/api/openclaw/agents",
   summary: "/api/dashboard/summary",
   kanban: "/api/kanban/tasks",
   cronJobs: "/api/cron/jobs",
@@ -103,6 +104,7 @@ export interface EndpointTypes {
   "/api/agents": AgentsResponse;
   "/api/agents/tools": ToolsResponse;
   "/api/office/state": OfficeStateResponse;
+  "/api/openclaw/agents": OpenClawAgentsResponse;
   "/api/dashboard/summary": DashboardSummary;
   "/api/kanban/tasks": KanbanResponse;
   "/api/cron/jobs": CronJobsResponse;

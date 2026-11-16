@@ -201,3 +201,28 @@ export interface SkillsResponse {
   definition: string;
   source: string;
 }
+
+// /api/openclaw/agents (read-only OpenClaw team; never transcripts or secrets)
+export interface OpenClawAgent {
+  name: string;
+  display_name: string;
+  emoji: string | null;
+  theme: string | null;
+  model: string | null;            // provider prefix and @auth-profile suffix stripped
+  model_inherited: boolean;        // true = from agents.defaults.model
+  can_delegate_to: string[];
+  gateway_status: "running" | "stopped" | "unknown";
+  last_run_at: string | null;
+  is_running: boolean;             // phase 1: always false (rule not yet validated)
+  session_count: number;
+  error: string | null;
+}
+export interface OpenClawAgentsResponse {
+  agents: OpenClawAgent[];
+  count: number;
+  gateway: "running" | "stopped" | "unknown";
+  gateway_detail: string;
+  available: boolean;
+  error: string | null;
+  source: string;
+}
