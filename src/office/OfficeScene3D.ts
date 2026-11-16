@@ -86,7 +86,23 @@ interface Agent3D {
   book: THREE.Mesh; hit: THREE.Mesh; ring: THREE.Mesh; tag: Sprite2D; zzz: THREE.Sprite; dots: THREE.Sprite; excl: THREE.Sprite;
   spot: Spot | null; path: Waypoint[]; floor: FloorNo; lastNode: string; pose: Pose; atSpot: boolean;
   deskIdx: number; since: number | null; phase: number;
+  /** Claude Code CLI is a tool, not a person: rendered as a floating energy orb instead of a body. */
+  orb?: Orb;
 }
+interface Orb {
+  state: ToolStatus; float: THREE.Group; core: THREE.Mesh; coreMat: THREE.MeshBasicMaterial; innerMat: THREE.MeshBasicMaterial;
+  halo: THREE.Mesh; haloMat: THREE.MeshBasicMaterial; sparks: THREE.Mesh[]; sparkMat: THREE.MeshBasicMaterial; light: THREE.PointLight; tagClock: number;
+}
+/** Energy-orb look per Claude CLI tool state. Light intensities are legacy units (x PI, like the other lights). */
+const ORB_LOOK: Record<ToolStatus, { core: number; inner: number; innerOp: number; halo: number; haloOp: number; light: number }> = {
+  working: { core: 0xf97316, inner: 0xffb347, innerOp: 0.35, halo: 0xffe2bf, haloOp: 0.13, light: 1.2 },
+  idle: { core: 0x8b6914, inner: 0xb08a3a, innerOp: 0.14, halo: 0xd9c49a, haloOp: 0.05, light: 0.1 },
+  unknown: { core: 0x5a5a5a, inner: 0x7a7a7a, innerOp: 0.1, halo: 0x9a9a9a, haloOp: 0.04, light: 0 },
+};
+const ORB_Y = 1.2;
+const ORB_SPARKS = 10;
+/** Corner floor lamps: off-ish by day, warm glow at night. */
+const LAMP = { bulbDay: 0xd4b85a, bulbNight: 0xfff5c0, light: 0xffd580, dayI: 0.05, nightI: 0.6, dist: 5, decay: 1.5 };
 
 const C = {
   wall: 0xece4d2, part: 0xe0d7c3, slab: 0xd9cfba, wood: 0xc48a55, woodDark: 0x8a5a34, deskTop: 0xeadcc0, metal: 0x2c2f36,
@@ -130,19 +146,25 @@ function readSidebarOpen() {
   try { return localStorage.getItem(SIDEBAR_KEY) !== "false"; } catch { return true; }
 }
 const hex6 = (n: number) => "#" + n.toString(16).padStart(6, "0");
-/** 8x8 Minecraft-style head (hair, skin, eyes, shirt strip) or a ">_" terminal for Claude CLI. */
-function drawFace(robot: boolean, skin: string, hair: string, shirt: string): string {
+/** Roster icon for Claude CLI: a glowing orb (radial gradient, bright centre fading to transparent). */
+function drawOrbFace(state: ToolStatus): string {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d");
+  if (!g) return "";
+  g.fillStyle = "#1c1f26"; g.fillRect(0, 0, 64, 64);
+  const col = state === "working" ? CLAUDE_COLOR : state === "idle" ? "#8B6914" : "#5A5A5A";
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 30);
+  grad.addColorStop(0, state === "working" ? "#FFE2BF" : col); grad.addColorStop(0.3, col); grad.addColorStop(1, "rgba(0,0,0,0)");
+  g.globalAlpha = state === "working" ? 1 : 0.7;
+  g.fillStyle = grad; g.beginPath(); g.arc(32, 32, 30, 0, Math.PI * 2); g.fill();
+  return c.toDataURL();
+}
+/** 8x8 Minecraft-style head (hair, skin, eyes, shirt strip). */
+function drawFace(skin: string, hair: string, shirt: string): string {
   const c = document.createElement("canvas"); c.width = c.height = 64;
   const g = c.getContext("2d");
   if (!g) return "";
   g.imageSmoothingEnabled = false;
-  if (robot) {
-    g.fillStyle = "#1c1f26"; g.fillRect(0, 0, 64, 64);
-    g.fillStyle = "#2c313c"; g.fillRect(0, 0, 64, 10);
-    g.fillStyle = CLAUDE_COLOR; g.font = "700 30px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
-    g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(">_", 32, 38);
-    return c.toDataURL();
-  }
   const px = (x: number, y: number, w: number, h: number, col: string) => { g.fillStyle = col; g.fillRect(x * 8, y * 8, w * 8, h * 8); };
   px(0, 0, 8, 8, hair);            // hair block = background
   px(1, 2, 6, 5, skin); px(0, 4, 8, 3, skin);   // face, sideburns above row 4
@@ -174,6 +196,9 @@ export class OfficeScene3D {
   private labels: THREE.Sprite[] = [];
   private animators: Animator[] = [];
   private deskScreens: THREE.MeshLambertMaterial[] = [];
+  /** Corner floor lamps (5 per floor), switched by setTimeOfDay(). */
+  private lampLights: THREE.PointLight[] = [];
+  private lampBulbs: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[] = [];
   private spots: Spot[] = [];
   private G: Record<FloorNo, Record<string, GNode>> = { 1: {}, 2: {} };
   private mats = new Map<string, THREE.MeshLambertMaterial>();
@@ -286,7 +311,8 @@ export class OfficeScene3D {
     if (meta.color && meta.color !== d.color) { d.color = meta.color; a.shirt.color.set(meta.color); changed = true; }
     if (STATUS[status] && status !== prev) {
       d.status = status; a.since = Date.now(); a.lightMat.color.set(STATUS[status].color);
-      this.go(a, this.pickSpot(a)); changed = true;
+      if (a.orb) { this.applyOrb(a); this.deskGlow(a); } else this.go(a, this.pickSpot(a));
+      changed = true;
     }
     if (changed) this.drawTag(a);
     this.dirty = true;
@@ -503,6 +529,19 @@ export class OfficeScene3D {
       }
     }
   }
+  /** Standing corner lamp: base, pole, open cone shade, glowing bulb + a point light (night only). */
+  private floorLamp(F: THREE.Group, x: number, z: number) {
+    const g = this.grp(F, x, z, 0);
+    this.box(g, 0.3, 0.08, 0.3, 0, 0, 0, C.metal);
+    this.cyl(g, 0.04, 0.04, 1.6, 0, 0.08, 0, C.metal, 8);
+    const shade = new THREE.Mesh(this.geo("lampShade", () => new THREE.CylinderGeometry(0.06, 0.3, 0.3, 16, 1, true)),
+      this.M(0xe8d5b0, { side: THREE.DoubleSide }));
+    shade.position.y = 1.55; shade.castShadow = true; g.add(shade);
+    const bulb = new THREE.Mesh(this.geo("lampBulb", () => new THREE.SphereGeometry(0.08, 12, 8)), new THREE.MeshBasicMaterial({ color: LAMP.bulbDay }));
+    bulb.position.y = 1.44; g.add(bulb);
+    const light = new THREE.PointLight(LAMP.light, LAMP.dayI * Math.PI, LAMP.dist, LAMP.decay); light.position.y = 1.36; g.add(light);
+    this.lampBulbs.push(bulb); this.lampLights.push(light);
+  }
   private toilet(F: THREE.Group) {
     this.box(F, 4.4, 0.02, 3.7, 9.8, 0.003, 4.1, C.tile);
     this.part(F, 7.5, 2.2, 12, 2.2, 1.7); this.part(F, 7.5, 2.2, 7.5, 3.2, 1.7); this.part(F, 7.5, 4.3, 7.5, 6, 1.7);
@@ -671,6 +710,13 @@ export class OfficeScene3D {
     this.plant(F, 0.7, 5.35); this.plant(F, 1.6, 5.4, 0.9); this.plant(F, 2.5, 5.35);
     this.box(F, 1.3, 0.03, 0.7, 5.75, 0.003, 5.4, 0x6b5a48);
     this.node(1, "S1", 4.8, 3.75); this.link(1, "hubE", "S1", "WCo");
+
+    /* corner lamps (nudged off the plants, partitions and the toilet from the nominal corners) */
+    this.floorLamp(F, -10.85, -5.65); // Ruang Kerja, back-left
+    this.floorLamp(F, 5.7, -3.3);     // Ruang Tamu, right side (back-right corner holds a plant)
+    this.floorLamp(F, -10.5, 5.5);    // front-left
+    this.floorLamp(F, 11.6, -1.3);    // Island Hangout, right side
+    this.floorLamp(F, -11.65, 0.0);   // left side mid, just north of the meeting-room partition
   }
 
   // ================================================================== Lantai 2
@@ -769,6 +815,13 @@ export class OfficeScene3D {
     this.roomLabel(F, "Balkon", -6.3, 7.6, 2.0);
 
     this.toilet(F); this.roomLabel(F, "Toilet", 9.8, 4.2, 2.2);
+
+    /* corner lamps */
+    this.floorLamp(F, -11.75, -3.0); // Kamar Tidur (bunks fill the back wall)
+    this.floorLamp(F, 3.05, -5.6);   // Sofa Baca, back-right past the shelves
+    this.floorLamp(F, 11.0, -5.6);   // Ruang Game
+    this.floorLamp(F, -7.6, 5.6);    // beside the balcony door (not in it)
+    this.floorLamp(F, -11.7, 2.6);   // Tempat Istirahat
   }
 
   // ================================================================== outdoor
@@ -853,18 +906,23 @@ export class OfficeScene3D {
   }
 
   // ================================================================== agents
-  private drawTag(a: Agent3D) {
+  private drawTag(a: Agent3D, pulse?: number) {
     const g = a.tag.c.getContext("2d")!;
     g.clearRect(0, 0, 320, 72); g.font = "600 27px " + FONT;
     const name = a.data.name, tw = Math.min(300, g.measureText(name).width + 62), x = (320 - tw) / 2;
     g.fillStyle = "rgba(22,28,36,.86)"; rr(g, x, 12, tw, 48, 24); g.fill();
     if (a === this.selected) { g.strokeStyle = "#ffffff"; g.lineWidth = 3.5; rr(g, x + 2, 14, tw - 4, 44, 22); g.stroke(); }
-    g.fillStyle = STATUS[a.data.status].color; g.beginPath(); g.arc(x + 25, 36, 9, 0, Math.PI * 2); g.fill();
+    g.fillStyle = STATUS[a.data.status].color;
+    if (pulse !== undefined) { // expanding ring around the dot (working orb)
+      g.globalAlpha = 0.55 * (1 - pulse); g.beginPath(); g.arc(x + 25, 36, 9 + pulse * 8, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    }
+    g.beginPath(); g.arc(x + 25, 36, 9, 0, Math.PI * 2); g.fill();
     g.fillStyle = "#ffffff"; g.textAlign = "left"; g.textBaseline = "middle"; g.fillText(name, x + 42, 38, tw - 56);
     a.tag.tex.needsUpdate = true;
   }
 
   private buildAgent(d: AgentData, deskIdx: number): Agent3D {
+    if (d.id === CLAUDE_AGENT_ID) return this.buildOrb(d, deskIdx);
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
     const sm = new THREE.MeshLambertMaterial({ color: d.color }), skin = SKINS[deskIdx % SKINS.length], hair = HAIRS[(deskIdx * 5 + 2) % HAIRS.length];
     this.box(body, 0.44, 0.48, 0.26, 0, 0.45, 0, sm);
@@ -900,6 +958,79 @@ export class OfficeScene3D {
     return a;
   }
 
+  private toolState(s: AgentStatus): ToolStatus { return s === "working" ? "working" : s === "idle" ? "idle" : "unknown"; }
+  /** Claude Code CLI as a floating energy orb: core + inner glow + outer halo, orbiting sparks, a point light. */
+  private buildOrb(d: AgentData, deskIdx: number): Agent3D {
+    const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
+    const float = new THREE.Group(); float.position.y = ORB_Y; g.add(float);
+    const sphere = (r: number, m: THREE.Material) => {
+      const s = new THREE.Mesh(this.geo(`orb${r}`, () => new THREE.SphereGeometry(r, 24, 16)), m); float.add(s); return s;
+    };
+    const coreMat = new THREE.MeshBasicMaterial({ color: ORB_LOOK.working.core });
+    const innerMat = new THREE.MeshBasicMaterial({ color: ORB_LOOK.working.inner, transparent: true, opacity: 0.35, depthWrite: false });
+    const haloMat = new THREE.MeshBasicMaterial({ color: ORB_LOOK.working.halo, transparent: true, opacity: 0.13, depthWrite: false });
+    const core = sphere(0.35, coreMat); sphere(0.5, innerMat).renderOrder = 2;
+    const halo = sphere(0.7, haloMat); halo.renderOrder = 3;
+    const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffd08a });
+    const sparkGeo = this.geo("spark", () => new THREE.BoxGeometry(0.05, 0.05, 0.05));
+    const sparks: THREE.Mesh[] = [];
+    for (let i = 0; i < ORB_SPARKS; i++) { const m = new THREE.Mesh(sparkGeo, sparkMat); m.visible = false; g.add(m); sparks.push(m); }
+    const light = new THREE.PointLight(0xff8c00, 0, 4, 2); light.position.y = ORB_Y; g.add(light);
+    const hit = this.box(g, 1.2, 1.4, 1.2, 0, ORB_Y - 0.7, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
+    const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; ring.renderOrder = 5; g.add(ring);
+    const tag = this.textSprite(320, 72, 2.8, 0.63); tag.sp.renderOrder = 30; tag.sp.position.set(0, ORB_Y + 1.05, 0); g.add(tag.sp);
+    // Person-only parts (limbs, bubbles) are inert stand-ins: orbs never walk, pose or use them.
+    const stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
+    const a: Agent3D = {
+      data: d, group: g, body, lightMat: new THREE.MeshBasicMaterial(), shirt: new THREE.MeshLambertMaterial(),
+      legL: new THREE.Group(), legR: new THREE.Group(), armL: new THREE.Group(), armR: new THREE.Group(),
+      book: hit, hit, ring, tag, zzz: stub, dots: stub, excl: stub,
+      spot: null, path: [], floor: 1, lastNode: "hubC", pose: "stand", atSpot: false, deskIdx, since: null, phase: 0,
+      orb: { state: "unknown", float, core, coreMat, innerMat, halo, haloMat, sparks, sparkMat, light, tagClock: 0 },
+    };
+    hit.userData.agent = a;
+    this.applyOrb(a);
+    this.drawTag(a);
+    return a;
+  }
+  /** Colours/opacities/light for the orb's current tool state. */
+  private applyOrb(a: Agent3D) {
+    const o = a.orb!; o.state = this.toolState(a.data.status);
+    const L = ORB_LOOK[o.state];
+    o.coreMat.color.setHex(L.core); o.innerMat.color.setHex(L.inner); o.innerMat.opacity = L.innerOp;
+    o.haloMat.color.setHex(L.halo); o.haloMat.opacity = L.haloOp; o.halo.scale.setScalar(1);
+    // Never toggle light.visible: a changing light count recompiles every material. Intensity only.
+    o.light.intensity = L.light * Math.PI;
+    const on = o.state === "working";
+    o.sparks.forEach((s, i) => {
+      s.visible = on;
+      if (on) { const ang = (i / o.sparks.length) * Math.PI * 2; s.position.set(Math.cos(ang) * 0.75, ORB_Y, Math.sin(ang) * 0.55); }
+    });
+    if (o.state === "unknown") o.float.position.y = ORB_Y;
+    this.dirty = true;
+  }
+  private stepOrb(a: Agent3D, dt: number, t: number) {
+    const o = a.orb!;
+    if (this.reduce) return;
+    const working = o.state === "working";
+    o.float.rotation.y += dt * (working ? 0.9 : 0.3);
+    if (o.state !== "unknown") o.float.position.y = ORB_Y + Math.sin(t * 1.2) * 0.15;
+    if (!working) return;
+    const p = 0.5 + 0.5 * Math.sin((t * Math.PI * 2) / 0.8); // 0..1, 0.8 s cycle
+    o.halo.scale.setScalar(0.9 + p * 0.5);
+    o.light.intensity = (0.8 + p * 0.8) * Math.PI;
+    const cy = o.float.position.y;
+    o.sparks.forEach((s, i) => {
+      const sp = 0.8 + i * 0.15, ph = i * 2.399, ang = t * sp + ph;
+      const rx = 0.62 + (i % 3) * 0.1, rz = 0.45 + (i % 4) * 0.07;
+      s.position.set(Math.cos(ang) * rx, cy + Math.sin(ang * 1.7 + ph) * 0.28, Math.sin(ang) * rz);
+      s.rotation.set(ang, ang * 1.3, 0);
+    });
+    o.tagClock += dt; // pulse the label's status dot (~12 redraws/s)
+    if (o.tagClock > 0.08) { o.tagClock = 0; this.drawTag(a, 0.5 + 0.5 * Math.sin(t * 5)); }
+  }
   private addAgent(id: string, status: AgentStatus, name: string, task: string | null | undefined, meta: AgentMeta) {
     const used = new Set(this.agents.map((x) => x.deskIdx));
     const nDesks = this.deskScreens.length;
@@ -913,8 +1044,14 @@ export class OfficeScene3D {
     };
     const a = this.buildAgent(d, desk);
     this.agents.push(a); this.byId.set(id, a);
-    const s = this.pickSpot(a);
-    if (s) this.place(a, s);
+    if (a.orb) { // hovers over its own desk chair; never walks
+      const ds = this.spots.filter((x) => x.use[0] === "desk"), s = ds[a.deskIdx % ds.length];
+      this.claim(a, s); a.floor = s.floor; this.floors[s.floor].add(a.group);
+      a.group.position.set(s.x, 0, s.z); a.lastNode = s.node; a.atSpot = true; this.deskGlow(a);
+    } else {
+      const s = this.pickSpot(a);
+      if (s) this.place(a, s);
+    }
     if (this.pendingFocus === id) { this.pendingFocus = null; this.select(id); }
     this.dirty = true;
   }
@@ -928,6 +1065,7 @@ export class OfficeScene3D {
       if ((o as THREE.Sprite).isSprite) { const sm = m.material as THREE.SpriteMaterial; sm.map?.dispose(); sm.dispose(); }
     });
     a.shirt.dispose(); a.lightMat.dispose(); (a.ring.material as THREE.Material).dispose();
+    if (a.orb) { const o = a.orb; [o.coreMat, o.innerMat, o.haloMat, o.sparkMat].forEach((m) => m.dispose()); o.light.dispose(); }
     this.agents = this.agents.filter((x) => x !== a); this.byId.delete(a.data.id);
     if (this.selected === a) this.selected = null;
     this.dirty = true;
@@ -945,7 +1083,7 @@ export class OfficeScene3D {
   }
   private deskGlow(a: Agent3D) {
     const m = this.deskScreens[a.deskIdx]; if (!m) return;
-    const on = a.atSpot && a.spot && a.spot.use[0] === "desk";
+    const on = a.orb ? a.data.status === "working" : a.atSpot && a.spot && a.spot.use[0] === "desk";
     m.emissive.setHex(on ? (a.data.status === "error" ? 0xd03a3a : 0x3fa6ee) : 0x000000);
   }
   private pickSpot(a: Agent3D): Spot | null {
@@ -1082,11 +1220,11 @@ export class OfficeScene3D {
     }
   }
   private faceIcon(a: Agent3D) {
-    const robot = a.data.id === CLAUDE_AGENT_ID;
+    const orb = a.orb ? a.orb.state : null;
     const skin = hex6(SKINS[a.deskIdx % SKINS.length]), hair = hex6(HAIRS[(a.deskIdx * 5 + 2) % HAIRS.length]);
-    const key = robot ? "robot" : skin + hair + a.data.color;
+    const key = orb ? "orb:" + orb : skin + hair + a.data.color;
     let url = this.faces.get(key);
-    if (url === undefined) { url = drawFace(robot, skin, hair, a.data.color); this.faces.set(key, url); }
+    if (url === undefined) { url = orb ? drawOrbFace(orb) : drawFace(skin, hair, a.data.color); this.faces.set(key, url); }
     return url;
   }
   private renderRoster() {
@@ -1107,7 +1245,8 @@ export class OfficeScene3D {
       const li = el("li"), b = el("button"); b.type = "button";
       if (a === this.selected) b.setAttribute("aria-current", "true");
       const av = el("span", "o3d-avatar"), face = el("img"); face.src = this.faceIcon(a); face.alt = ""; face.draggable = false;
-      av.style.background = a.data.color; av.appendChild(face);
+      av.style.background = a.orb ? "#1c1f26" : a.data.color; av.appendChild(face);
+      if (a.orb) b.classList.add("o3d-orb", "o3d-orb-" + a.orb.state);
       const st = el("i"); st.style.background = STATUS[a.data.status].color; av.appendChild(st);
       const oc = a.data.id.startsWith("openclaw:");
       const fw = el("span", "o3d-fw " + (oc ? "badge-openclaw" : "badge-hermes"), oc ? "OC" : "H");
@@ -1190,6 +1329,9 @@ export class OfficeScene3D {
     this.scene.background = new THREE.Color(v.bg);
     this.hemi.intensity = v.hemi * Math.PI; this.hemi.color.setHex(v.hemiColor);
     this.sun.intensity = v.sun * Math.PI; this.sun.color.setHex(v.sunColor);
+    const isNight = this.tod === "night";
+    this.lampLights.forEach((l) => { l.intensity = (isNight ? LAMP.nightI : LAMP.dayI) * Math.PI; });
+    this.lampBulbs.forEach((b) => { b.material.color.setHex(isNight ? LAMP.bulbNight : LAMP.bulbDay); });
   }
 
   // ================================================================== events + loop
@@ -1230,7 +1372,7 @@ export class OfficeScene3D {
       if (k >= 1) this.tween = null;
     }
     this.controls.update(); this.updateWalls();
-    for (const a of this.agents) { this.stepAgent(a, dt, t); a.tag.sp.visible = !(this.mode === "f2" && a.floor === 1); }
+    for (const a of this.agents) { if (a.orb) this.stepOrb(a, dt, t); else this.stepAgent(a, dt, t); a.tag.sp.visible = !(this.mode === "f2" && a.floor === 1); }
     if (!this.reduce) for (const fn of this.animators) fn(dt, t);
     else if (this.animators.length) this.animators[0](dt, t); // clock hands only
     this.detailClock += dt;
