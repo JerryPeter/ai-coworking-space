@@ -2,7 +2,7 @@
 // Polls /api/office/state every 5 s. Characters only show "working" when the API says so
 // (a kanban claim, or a live session lease with activity < 10 min ago; see state_source).
 // TODO Phase 2: add OpenClaw team to 3D office (needs desk layout from Susi)
-import { Box, Grid3x3, Moon, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { endpoints, useApi } from "../api/client";
 import type { OfficeState, ToolState } from "../api/types";
@@ -15,9 +15,7 @@ import { relative, useNow } from "../lib/time";
 import { OfficeScene, webglAvailable, type Preset } from "../office/OfficeScene";
 import { hasSeat, loungeSpotFor } from "../office/layout";
 import type { RobotState } from "../office/characters";
-import { MODE_KEY, readMode, readTod, store, TOD_KEY, type OfficeMode, type TimeOfDay } from "../office/palettes";
-import { PixelOfficeScene } from "../office/PixelOfficeScene";
-import { lookFor } from "../office/pixel-characters";
+import { readTod, store, TOD_KEY, type TimeOfDay } from "../office/palettes";
 import type { OfficeRenderer } from "../office/types";
 import { AGENTS, CLAUDE, CLAUDE_ID, identity, rosterIndex } from "../theme/agents";
 
@@ -26,29 +24,6 @@ const robotState = (s: ToolState | undefined): RobotState => (s === "working" ? 
 const ROBOT_LABEL: Record<RobotState, string> = { running: "Running", not_running: "Not running", unknown: "Unknown" };
 const PRESET_LABEL: Record<Preset, string> = { overview: "Overview", workspace: "Floor 0 · Workspace", lounge: "Floor 1 · Lounge" };
 const ZONE_NAME = { tv: "TV corner", balcony: "Balcony", nap: "Rest room", commons: "Commons" } as const;
-
-/** Legend avatar in Pixel mode: the sprite's own colours (hat/hair, skin, shirt, pants) as pixel squares. */
-function PixelChip({ id }: { id: string }) {
-  if (id === CLAUDE_ID) {
-    return (
-      <svg className="pixel-chip" width={20} height={20} viewBox="0 0 10 10" shapeRendering="crispEdges" aria-hidden="true">
-        <rect x={4} y={0} width={2} height={1} fill="#F97316" /><rect x={1} y={1} width={8} height={4} fill="#2B2F3A" />
-        <rect x={2} y={2} width={6} height={2} fill="#0F172A" /><rect x={3} y={2} width={1} height={1} fill="#F97316" />
-        <rect x={5} y={3} width={2} height={1} fill="#F97316" /><rect x={2} y={5} width={6} height={3} fill="#F97316" />
-        <rect x={1} y={8} width={8} height={2} fill="#374151" />
-      </svg>
-    );
-  }
-  const l = lookFor(id, identity(id).hex);
-  const hat = l.kind === "bagas" ? "#4D7C0F" : l.kind === "susi" ? "#DB2777" : l.hair;
-  return (
-    <svg className="pixel-chip" width={20} height={20} viewBox="0 0 10 10" shapeRendering="crispEdges" aria-hidden="true">
-      <rect x={2} y={0} width={6} height={2} fill={hat} /><rect x={3} y={2} width={4} height={3} fill={l.skin} />
-      <rect x={2} y={2} width={1} height={2} fill={l.hair} /><rect x={7} y={2} width={1} height={2} fill={l.hair} />
-      <rect x={1} y={5} width={8} height={3} fill={l.body} /><rect x={3} y={8} width={4} height={2} fill={l.pants} />
-    </svg>
-  );
-}
 
 export default function Office() {
   const office = useApi(endpoints.office, 5_000);
@@ -60,21 +35,17 @@ export default function Office() {
   const [gl] = useState(webglAvailable);
   const [preset, setPreset] = useState<Preset>("overview");
   const [voxelError, setVoxelError] = useState<string | null>(null);
-  const [initError, setInitError] = useState<string | null>(null);
   const [tod, setTod] = useState<TimeOfDay>(readTod);
-  const [modePref, setModePref] = useState<OfficeMode>(readMode);
-  // No WebGL (or the 3D scene failed to start) → Pixel Office, which only needs Canvas 2D (tech plan D4).
+  // No WebGL (or the 3D scene failed to start) → table fallback below.
   const voxelOk = gl && !voxelError;
-  const mode: OfficeMode = voxelOk ? modePref : "pixel";
   // Latest UI state for a freshly mounted renderer, read without re-running the mount effect.
   const ui = useRef({ tod, preset });
   ui.current = { tod, preset };
   const focusParam = params.get("focus");
 
-  // Mount ONE renderer for the active mode; switching mode disposes the old one first (Option B,
-  // the same cleanup path that runs on every view navigation). The host div is keyed per mode.
+  // Mount the renderer once; dispose runs on every view navigation.
   useEffect(() => {
-    if (!host.current) return;
+    if (!host.current || !voxelOk) return;
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const opts = {
       characters: AGENTS.map((a) => ({ id: a.id, hex: a.hex, shortName: a.shortName, index: rosterIndex(a.id) })),
@@ -86,28 +57,22 @@ export default function Office() {
     };
     let s: OfficeRenderer;
     try {
-      s = mode === "voxel" ? new OfficeScene(host.current, opts) : new PixelOfficeScene(host.current, opts);
+      s = new OfficeScene(host.current, opts);
     } catch (e) {
-      if (mode === "voxel") setVoxelError((e as Error).message);
-      else setInitError((e as Error).message);
+      setVoxelError((e as Error).message);
       return;
     }
     scene.current = s;
     s.setTimeOfDay(ui.current.tod, { instant: true }); // persisted choice, no tween on first paint
-    if (ui.current.preset !== "overview") s.preset(ui.current.preset); // keep the floor across mode switches
+    if (ui.current.preset !== "overview") s.preset(ui.current.preset);
     return () => { s.dispose(); scene.current = null; setReady(false); };
-  }, [mode]);
+  }, [voxelOk]);
 
   const toggleTod = () => {
     const next: TimeOfDay = tod === "day" ? "night" : "day";
     setTod(next);
     store(TOD_KEY, next);
     scene.current?.setTimeOfDay(next);
-  };
-  const switchMode = (m: OfficeMode) => {
-    if (m === mode) return;
-    setModePref(m);
-    store(MODE_KEY, m);
   };
 
   // Push API state into the scene (re-runs on `ready`, so a newly mounted renderer gets it at once).
@@ -139,6 +104,7 @@ export default function Office() {
     { id: CLAUDE_ID, name: "Claude Code CLI", seat: true, badge: <StatusBadge status={toolBadge(data?.claude_tool?.state)} compact title={data?.claude_tool?.detail ?? undefined} />, label: ROBOT_LABEL[robotState(data?.claude_tool?.state)] },
   ];
 
+  const initError = !gl ? "WebGL is not available in this browser" : voxelError;
   if (initError) {
     return (
       <div className="webgl-fallback stack">
@@ -173,15 +139,8 @@ export default function Office() {
   return (
     <div className="office">
       <div className="office-frame">
-        <div key={mode} ref={host} className={`office-canvas ${mode}${ready ? " ready" : ""}`} />
+        <div ref={host} className={`office-canvas${ready ? " ready" : ""}`} />
         <div className="ov ov-tl">
-          <div className="segmented" role="radiogroup" aria-label="Office graphics">
-            <button className="icon" role="radio" aria-checked={mode === "voxel"} aria-pressed={mode === "voxel"} aria-label="Voxel 3D"
-              disabled={!voxelOk} title={voxelOk ? "Voxel 3D" : "3D needs WebGL, which isn't available here"} onClick={() => switchMode("voxel")}><Box size={16} /></button>
-            <button className="icon" role="radio" aria-checked={mode === "pixel"} aria-pressed={mode === "pixel"} aria-label="Pixel Office"
-              title="Pixel Office" onClick={() => switchMode("pixel")}><Grid3x3 size={16} /></button>
-          </div>
-          <span className="ov-sep" aria-hidden="true" />
           <div className="segmented" role="radiogroup" aria-label="Time of day">
             <button className="icon tod-day" role="radio" aria-checked={tod === "day"} aria-pressed={tod === "day"} aria-label="Day" title="Day mode"
               onClick={() => tod !== "day" && toggleTod()}><Sun size={16} /></button>
@@ -204,7 +163,7 @@ export default function Office() {
             <button key={r.id} className="legend-row" disabled={!r.seat}
               onClick={() => { scene.current?.focus(r.id); setParams({ agent: r.id, tab: null }); }}
               title={r.seat ? `Focus ${r.name}` : "No desk assigned in the office layout"}>
-              {mode === "pixel" ? <PixelChip id={r.id} /> : <PixelAvatar id={r.id} size={20} tile={false} />}
+              <PixelAvatar id={r.id} size={20} tile={false} />
               <span className="nm truncate">{r.name}</span>
               {r.badge}
               <span className="xs secondary">{r.label}</span>
@@ -212,7 +171,7 @@ export default function Office() {
           ))}
           {office.error && <div className="xs" style={{ color: "var(--outcome-failed)", padding: "4px 6px" }}>{office.error.message}</div>}
         </div>
-        <div className="ov ov-bl">{mode === "pixel" ? "Click to focus · Floor buttons change view" : "Drag to orbit · Scroll to zoom · Click a character for details · Use the floor buttons to switch floors"}</div>
+        <div className="ov ov-bl">Drag to orbit · Scroll to zoom · Click a character for details · Use the floor buttons to switch floors</div>
         <div className="ov ov-br tabular">
           {office.updatedAt ? `State updated ${relative(office.updatedAt, now)} · every 5s` : "Loading state…"}
         </div>

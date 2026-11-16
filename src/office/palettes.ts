@@ -1,9 +1,7 @@
-// Day/Night palettes for both office renderers (pixel-office-design-spec.md section 3, tech plan 4).
-// Pure data, no Three.js import: the Pixel renderer pulls this in without dragging WebGL code along.
+// Day/Night palettes for the 3D office renderer. Pure data, no Three.js import.
 import type { LightState, Preset } from "./layout";
 
 export type TimeOfDay = "day" | "night";
-export type OfficeMode = "voxel" | "pixel";
 
 // ---------------- Voxel 3D (spec 3.1) ----------------
 
@@ -63,82 +61,10 @@ export function voxelLights(tod: TimeOfDay, preset: Preset): VoxelLightState {
   };
 }
 
-// ---------------- Pixel Office (spec 3.2) ----------------
-
-export interface PixelPalette {
-  backdrop: string; sky: string;
-  floorA: string; floorB: string; grout: string; slab: string;
-  wall: string; wallShade: string; wallCap: string; wallSkirt: string; outline: string;
-  windowGlass: string; windowShine: string | null; moonStrip: string | null; windowFrame: string;
-  curtain: string; curtainShade: string; windowSpill: string | null;
-  lampShade: string; lampRim: string | null; lampPool: string | null;
-  bulb: string; bulbHalo: string | null;
-  deskTop: string; deskSide: string; deskTrim: string;
-  crtCase: string; crtScreenOff: string; lampMetal: string;
-  chair: string; chairBase: string;
-  shelfWood: string; shelfEdge: string; bookSpines: string[];
-  sofa: string; sofaBack: string; sofaSeam: string; napCushion: string; tvCabinet: string;
-  rugLounge: string; rugOpen: string; carpetMeeting: string; benchMat: string; napFloor: string;
-  partition: string; partitionCap: string; whiteboard: string;
-  deckA: string; deckB: string; railWood: string; railPost: string; stairTop: string; stairSide: string;
-  agentShadow: string; zText: string;
-}
-
-export const PIXEL_PALETTES: Record<TimeOfDay, PixelPalette> = {
-  day: {
-    backdrop: "#A89070", sky: "#BFE0F5",
-    floorA: "#E8D9B0", floorB: "#DDD0A5", grout: "#D2C394", slab: "#B89A6A",
-    wall: "#C4A882", wallShade: "#B39672", wallCap: "#D8C29E", wallSkirt: "#8B6A45", outline: "#5A3E22",
-    windowGlass: "#E8F4FF", windowShine: "#FFFFFF", moonStrip: null, windowFrame: "#8B6A45",
-    curtain: "#C8553D", curtainShade: "#A8432F", windowSpill: "rgba(255, 246, 216, 0.30)",
-    lampShade: "#D4A843", lampRim: null, lampPool: null,
-    bulb: "#C9B27A", bulbHalo: null,
-    deskTop: "#A0714F", deskSide: "#8B5E3C", deskTrim: "#6E4A2E",
-    crtCase: "#B9B2A3", crtScreenOff: "#3A4A40", lampMetal: "#5E5A55",
-    chair: "#4A3F3A", chairBase: "#2F2926",
-    shelfWood: "#6B4226", shelfEdge: "#82552F",
-    bookSpines: ["#C8553D", "#E0A33A", "#4F8A5B", "#3E6E9E", "#8E5BA6", "#D9C7A0", "#B23A48", "#2F6F6A"],
-    sofa: "#7E9A8C", sofaBack: "#6A8578", sofaSeam: "#5A7266", napCushion: "#C9B79C", tvCabinet: "#5A3E2B",
-    rugLounge: "#B5654B", rugOpen: "#9DA77F", carpetMeeting: "#8FA3B5", benchMat: "#B7A88C", napFloor: "#CDB991",
-    partition: "#B89A6A", partitionCap: "#D8C29E", whiteboard: "#F4F1E8",
-    deckA: "#B9875A", deckB: "#A6764C", railWood: "#8B5E3C", railPost: "#5E5A55", stairTop: "#C9A877", stairSide: "#A6865A",
-    agentShadow: "rgba(70, 45, 20, 0.28)", zText: "#E8EAF0",
-  },
-  night: {
-    backdrop: "#3A2810", sky: "#141A2C",
-    floorA: "#9C7A42", floorB: "#876A38", grout: "#7A5F31", slab: "#5A4220",
-    wall: "#6B4E2A", wallShade: "#5C4224", wallCap: "#7E5E36", wallSkirt: "#4A3418", outline: "#24180A",
-    windowGlass: "#1A2035", windowShine: null, moonStrip: "#3D5A80", windowFrame: "#4A3418",
-    curtain: "#7E3426", curtainShade: "#5E2519", windowSpill: null,
-    lampShade: "#FFB347", lampRim: "#FFF1C1", lampPool: "#FFB347",
-    bulb: "#FFD27A", bulbHalo: "rgba(255, 179, 71, 0.40)",
-    deskTop: "#7A5230", deskSide: "#6B4226", deskTrim: "#4E3119",
-    crtCase: "#7D776C", crtScreenOff: "#151B18", lampMetal: "#3E3A36",
-    chair: "#2E2724", chairBase: "#1C1816",
-    shelfWood: "#4A2E14", shelfEdge: "#5C3A1B",
-    bookSpines: ["#8E3B2A", "#A07428", "#37613F", "#2C4E70", "#643F75", "#9A8C6F", "#7E2833", "#21504C"],
-    sofa: "#4E6258", sofaBack: "#41524A", sofaSeam: "#34433C", napCushion: "#7E7262", tvCabinet: "#3A281B",
-    rugLounge: "#7A3F2E", rugOpen: "#5E6649", carpetMeeting: "#4E5C6B", benchMat: "#5E523E", napFloor: "#6E5730",
-    partition: "#5E4526", partitionCap: "#7E5E36", whiteboard: "#B9B4A8",
-    deckA: "#6E4E30", deckB: "#5E4128", railWood: "#5C3A1F", railPost: "#3E3A36", stairTop: "#7A5C33", stairSide: "#5E4526",
-    agentShadow: "rgba(10, 6, 2, 0.45)", zText: "#FFFFFF",
-  },
-};
-
-/** Status colours (copied from OfficeScene STATUS_HEX + spec 2.3.6; not imported, so no Three.js). */
-export const STATUS_DOT: Record<string, string> = {
-  working: "#22C55E", reviewing: "#F5B83D", idle: "#8394AE", online: "#22C55E",
-  offline: "#6B7285", unknown: "#6B7285", running: "#22C55E", not_running: "#8394AE",
-};
-
 // ---------------- persistence (tech plan 4.3) ----------------
 export const TOD_KEY = "mc.office.timeOfDay";
-export const MODE_KEY = "mc.office.mode";
 export function readTod(): TimeOfDay {
   try { return localStorage.getItem(TOD_KEY) === "night" ? "night" : "day"; } catch { return "day"; }
-}
-export function readMode(): OfficeMode {
-  try { return localStorage.getItem(MODE_KEY) === "pixel" ? "pixel" : "voxel"; } catch { return "voxel"; }
 }
 export function store(key: string, v: string) {
   try { localStorage.setItem(key, v); } catch { /* private mode / quota: ignore */ }
