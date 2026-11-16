@@ -6,22 +6,33 @@
 // blitted onto the on-screen canvas scaled by an integer factor with smoothing off. Layers 0–4 (backdrop,
 // floor, walls, furniture) are cached per (floor, time of day); only the dynamic layers redraw per frame.
 import type { HumanState, RobotState } from "./characters";
-import type { FloorId, Preset } from "./layout";
+import { DESKS, hasSeat, loungeSpotFor, type FloorId, type Preset } from "./layout";
 import type { SceneOptions } from "./OfficeScene";
-import { darken, PIXEL_PALETTES, type PixelPalette, type TimeOfDay } from "./palettes";
+import { darken, lighten, mixHex, PIXEL_PALETTES, STATUS_DOT, type PixelPalette, type TimeOfDay } from "./palettes";
+import { drawHuman, drawQuestion, drawRobot, drawShadow, drawZs, lookFor, type Anim } from "./pixel-characters";
 import { fillPoly, isoBox, isoTile, wallCol, wallQuad, type Ctx } from "./pixel-draw";
 import {
-  BUF_H, BUF_W, FLOOR_TILES, GRID_D, GRID_W, isoProject, STAIR_GRID, WALL_H, WALL_ITEMS, WALL_T, WALLS,
-  type TileKind, type WallItem,
+  BENCH_GRID, BUF_H, BUF_W, deskSpot, FLOOR_TILES, GRID_D, GRID_W, isoProject, loungePixelSpot, ROBOT_SPOT, STAIR_GRID,
+  WALL_H, WALL_ITEMS, WALL_T, WALLS, type PixelSpot, type TileKind, type WallItem,
 } from "./pixel-layout";
 import type { OfficeRenderer } from "./types";
-import { buildFurniture, crtScreen, deskGeo, drawBulbs, drawWallFurniture, type FurnitureSet } from "./pixel-furniture";
+import { buildFurniture, crtScreen, deskGeo, drawBulbs, drawChair, drawWallFurniture, sortItems, type DrawItem, type FurnitureSet } from "./pixel-furniture";
 
 export type PixelSceneOptions = SceneOptions;
 
 const P = isoProject;
 
 interface Panel { floor: FloorId; x: number; y: number; s: number; caption?: string }
+interface AgentData { state: HumanState; label: string; task: string | null }
+/** A character's label anchor on its floor buffer (buffer px), collected while drawing. */
+interface Anchor { id: string; floor: FloorId; x: number; feetY: number; top: number; state: string; text: string; name: string; muted: boolean }
+interface Hit { id: string; x0: number; y0: number; x1: number; y1: number }
+
+const TICK_MS = 100;               // spec 2.0: 10 fps animation tick
+const FOCUS_MS = 2000;             // highlight ring after focus()
+const LABEL_MAX = 26;              // spec 2.3.6 truncation
+const TV_CYCLE = ["#5B7CFA", "#2DD4BF", "#A78BFA"];
+const truncate = (t: string, n = LABEL_MAX) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
 
 export class PixelOfficeScene implements OfficeRenderer {
   private canvas: HTMLCanvasElement;
@@ -38,6 +49,17 @@ export class PixelOfficeScene implements OfficeRenderer {
   private frames: HTMLCanvasElement[] = [];
   private furniture = new Map<string, FurnitureSet>();
   private agentHex: Record<string, string> = {};
+  private agents = new Map<string, AgentData>();
+  private robot: { state: RobotState; label: string } | null = null;
+  private tick = 0;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private anchors: Anchor[] = [];
+  private hits: Hit[] = [];
+  private hovered: string | null = null;
+  private focusId: string | null = null;
+  private focusUntil = 0;
+  private focusTimer: ReturnType<typeof setTimeout> | null = null;
+  private down: { x: number; y: number } | null = null;
 
   constructor(private host: HTMLElement, private opts: PixelSceneOptions) {
     this.canvas = document.createElement("canvas");
@@ -51,10 +73,27 @@ export class PixelOfficeScene implements OfficeRenderer {
     this.ctx = ctx;
     this.frames = [this.makeBuffer(), this.makeBuffer()];
     opts.characters.forEach((c) => { this.agentHex[c.id] = c.hex; });
+    this.canvas.addEventListener("pointermove", this.onMove);
+    this.canvas.addEventListener("pointerdown", this.onDown);
+    this.canvas.addEventListener("pointerup", this.onUp);
+    this.canvas.addEventListener("pointerleave", this.onLeave);
+    document.addEventListener("visibilitychange", this.onVisibility);
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(host);
     this.resize();
+    this.startTick();
   }
+
+  // ---------------- animation tick (spec 2.0: 10 fps, paused while hidden, off for reduced motion) ----------------
+  private startTick() {
+    if (this.opts.reducedMotion || this.timer || document.hidden) return;
+    this.timer = setInterval(() => { this.tick++; this.render(); }, TICK_MS);
+  }
+  private stopTick() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+  private onVisibility = () => { if (document.hidden) this.stopTick(); else { this.startTick(); this.render(); } };
 
   private makeBuffer() {
     const c = document.createElement("canvas");
@@ -64,10 +103,31 @@ export class PixelOfficeScene implements OfficeRenderer {
   private get pal(): PixelPalette { return PIXEL_PALETTES[this.tod]; }
 
   // ---------------- public API (OfficeRenderer) ----------------
-  setAgentState(_id: string, _state: HumanState, _label: string, _task?: string | null) {}
-  setRobotState(_state: RobotState, _label: string) {}
+  setAgentState(id: string, state: HumanState, label: string, task?: string | null) {
+    const prev = this.agents.get(id), t = task?.trim() || null;
+    if (prev && prev.state === state && prev.label === label && prev.task === t) return;
+    this.agents.set(id, { state, label, task: t });
+    this.render();
+  }
+  setRobotState(state: RobotState, label: string) {
+    if (this.robot && this.robot.state === state && this.robot.label === label) return;
+    this.robot = { state, label };
+    this.render();
+  }
   preset(p: Preset) { this.current = p; this.layout(); this.render(); }
-  focus(_id: string) {}
+
+  /** Switch to the character's floor (like voxel) and ring it for 2 s. */
+  focus(id: string) {
+    const floor = this.floorOf(id);
+    if (floor === null) return;
+    const want: Preset = floor === 1 ? "lounge" : "workspace";
+    if (want !== this.current) { this.current = want; this.layout(); this.opts.onPresetChange?.(want); }
+    this.focusId = id;
+    this.focusUntil = performance.now() + FOCUS_MS;
+    if (this.focusTimer) clearTimeout(this.focusTimer);
+    this.focusTimer = setTimeout(() => { this.focusId = null; this.render(); }, FOCUS_MS);
+    this.render();
+  }
   setTimeOfDay(tod: TimeOfDay) {
     if (tod === this.tod) return;
     this.tod = tod;     // instant palette swap; the static cache is keyed by tod
@@ -119,6 +179,8 @@ export class PixelOfficeScene implements OfficeRenderer {
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = pal.backdrop;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    this.anchors = [];
+    this.hits = [];
     for (const p of this.panels) {
       const frame = this.frames[p.floor];
       const fctx = frame.getContext("2d")!;
@@ -141,7 +203,9 @@ export class PixelOfficeScene implements OfficeRenderer {
         ctx.fillText(p.caption, p.x + 4 * this.dpr, p.y - 4 * this.dpr);
       }
     }
-    this.canvas.setAttribute("aria-label", `Pixel office, ${this.current === "overview" ? "both floors" : this.current === "lounge" ? "Floor 1 lounge" : "Floor 0 workspace"}`);
+    this.drawLabels();
+    this.canvas.style.cursor = this.hovered ? "pointer" : "";
+    this.canvas.setAttribute("aria-label", this.summary());
     if (!this.firstFrame) { this.firstFrame = true; this.opts.onFirstFrame?.(); }
   }
 
@@ -217,16 +281,223 @@ export class PixelOfficeScene implements OfficeRenderer {
     return set;
   }
 
-  // ---------------- dynamic layers (per frame) ----------------
+  // ---------------- placement (spec 2.6, voxel parity: idle → lounge, everything else → desk) ----------------
+  private spotOf(id: string): PixelSpot | null {
+    if (id === this.opts.robot.id) return this.robot ? ROBOT_SPOT : null;
+    const a = this.agents.get(id);
+    if (!a || !hasSeat(id)) return null; // no data yet → not drawn (never invent a state)
+    return a.state === "idle" ? loungePixelSpot(loungeSpotFor(id)) : deskSpot(id);
+  }
+  private floorOf(id: string): FloorId | null { return this.spotOf(id)?.floor ?? null; }
+
+  // ---------------- dynamic layers (per frame): screens, chairs, characters (spec 2.5 layers 5–6) ----------------
   private drawDynamic(ctx: Ctx, f: FloorId) {
-    const p = this.pal;
+    const p = this.pal, t = this.tick, rm = this.opts.reducedMotion;
     if (f === 0) {
-      for (const id of Object.keys(this.agentHex)) {
+      // Desk CRTs by state (spec 2.4)
+      for (const id of Object.keys(DESKS)) {
         const g = deskGeo(id);
-        if (g) fillPoly(ctx, crtScreen(g), p.crtScreenOff);
+        if (!g) continue;
+        const st = this.agents.get(id)?.state, pts = crtScreen(g);
+        const col = st === "working" ? mixHex(this.agentHex[id] ?? "#6B7285", "#000000", 0.15)
+          : st === "reviewing" ? "#F5B83D" : st === "offline" ? "#111111" : p.crtScreenOff;
+        fillPoly(ctx, pts, col);
+        if (st === "working" || st === "reviewing") {
+          fillPoly(ctx, pts.map((q) => ({ x: q.x, y: q.y + 1 })), "rgba(0, 0, 0, 0.25)", 2); // scanlines
+          if (st === "working" && (rm || t % 10 < 5)) { ctx.fillStyle = "#FFFFFF"; ctx.fillRect(pts[3].x + 1, pts[3].y - 2, 1, 1); }
+        } else if (st !== "offline") {
+          ctx.fillStyle = lighten(p.crtScreenOff, 0.35); ctx.fillRect(pts[0].x + 1, pts[0].y + 1, 1, 1); // reflection
+        }
+      }
+      // Claude bench terminal + server rack LEDs (orange/green while running)
+      const running = this.robot?.state === "running";
+      const bx = BENCH_GRID.gx - 1.25, by = BENCH_GRID.gy - 1.5;
+      wallQuad(ctx, "r", by + 0.5, bx + 1.0 + 1 / 16, bx + 1.6 - 1 / 16, 2.45, 2.95, running ? mixHex("#F97316", "#000000", 0.4) : "#0F172A");
+      if (running) {
+        const c = P(bx + 1.1, by + 0.5, 2.75);
+        ctx.fillStyle = "#FDBA74"; ctx.fillRect(c.x, c.y, 1, 1); ctx.fillRect(c.x + 1, c.y + 1, 1, 1);
+        if (rm || t % 10 < 5) ctx.fillRect(c.x + 3, c.y + 2, 2, 1);
+      }
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 5; j++) {
+          const q = P(19.28 + i * 0.14, 0.85, 3.2 - j * 0.55);
+          const r = (i * 7 + j * 13 + Math.floor(t / 6) * 5) % 9;
+          ctx.fillStyle = !running ? "#374151" : rm ? "#22C55E" : r < 3 ? "#22C55E" : r < 5 ? "#F97316" : "#374151";
+          ctx.fillRect(q.x, q.y, 1, 1);
+        }
+      }
+    } else {
+      // TV: slow hard-swap colour cycle while someone watches, standby otherwise (spec 2.4)
+      const watching = [...this.agents.entries()].some(([id, a]) => a.state === "idle" && hasSeat(id) && loungeSpotFor(id).zone === "tv");
+      const col = watching ? TV_CYCLE[rm ? 0 : Math.floor(t / 20) % 3] : "#1E293B";
+      wallQuad(ctx, "l", 0, 2.45 + 2 / 16, 4.55 - 2 / 16, 1.95, 3.55, col);
+      if (watching) {
+        wallQuad(ctx, "l", 0, 3.0, 3.2, 2.4, 2.65, "#FFFFFF");
+        wallQuad(ctx, "l", 0, 3.6, 3.9, 2.9, 3.15, "#FFFFFF");
       }
     }
+
+    // Chairs + characters, depth-sorted by feet (gx + gy), tie → smaller gx (spec 2.5 layer 5)
+    const items: DrawItem[] = [];
+    if (f === 0) {
+      for (const id of Object.keys(DESKS)) {
+        const sp = deskSpot(id)!;
+        const occupied = this.spotOf(id)?.floor === 0;
+        const stripe = this.agentHex[id] ?? "#8C94A5";
+        items.push({ key: sp.gx + sp.gy - 0.01, top: 0, gx: sp.gx, draw: (c) => drawChair(c, p, sp.gx, sp.gy, occupied, stripe, "seat") });
+        items.push({ key: sp.gx + sp.gy + 0.01, top: 0, gx: sp.gx, draw: (c) => drawChair(c, p, sp.gx, sp.gy, occupied, stripe, "rim") });
+      }
+    }
+    for (const c of this.opts.characters) {
+      const sp = this.spotOf(c.id);
+      if (sp && sp.floor === f) items.push({ key: sp.gx + sp.gy, top: 1, gx: sp.gx, draw: (x) => this.drawAgent(x, c.id, sp) });
+    }
+    if (f === ROBOT_SPOT.floor && this.robot) {
+      const sp = ROBOT_SPOT;
+      items.push({ key: sp.gx + sp.gy, top: 1, gx: sp.gx, draw: (x) => this.drawRobotAt(x, sp) });
+    }
+    items.sort(sortItems).forEach((it) => it.draw(ctx));
   }
+
+  private ringFor(id: string): string | undefined {
+    const focused = this.focusId === id && performance.now() < this.focusUntil;
+    if (this.hovered === id || (focused && (this.opts.reducedMotion || Math.floor(this.tick / 3) % 2 === 0))) {
+      return id === this.opts.robot.id ? this.opts.robot.hex : this.agentHex[id];
+    }
+    return undefined;
+  }
+
+  private drawAgent(ctx: Ctx, id: string, sp: PixelSpot) {
+    const a = this.agents.get(id)!, rm = this.opts.reducedMotion, t = this.tick;
+    const ident = this.opts.characters.find((c) => c.id === id)!;
+    const floorPt = P(sp.gx, sp.gy, 0), feet = P(sp.gx, sp.gy, sp.seatH);
+    if (sp.pose !== "lie") drawShadow(ctx, floorPt.x, floorPt.y, this.pal.agentShadow, this.ringFor(id));
+    const anim: Anim = {
+      typing: !rm && a.state === "working",
+      tick: t,
+      bob: !rm && a.state === "idle" && sp.pose !== "lie" && Math.floor(t / 10) % 2 === 1 ? 1 : 0,
+      scanHead: !rm && a.state === "reviewing" && Math.floor(t / 15) % 2 === 1 ? 1 : 0,
+    };
+    const top = drawHuman(ctx, lookFor(id, ident.hex), feet.x, feet.y, sp.pose, sp.facing, anim, a.state === "offline");
+    if (sp.pose === "lie") {
+      if (this.ringFor(id)) drawShadow(ctx, feet.x, feet.y + 2, "rgba(0,0,0,0)", this.ringFor(id));
+      if (!rm) drawZs(ctx, feet.x + 6, top, t, this.pal.zText);
+    }
+    if (a.state === "unknown") drawQuestion(ctx, feet.x, top);
+    // Label text: activity text from the API if any, else the state label (+ lounge activity, like voxel tags)
+    const zone = a.state === "idle" ? loungeSpotFor(id).activity : null;
+    const text = a.task ?? (zone ? `${a.label} · ${zone}` : a.label);
+    this.anchors.push({ id, floor: sp.floor, x: feet.x, feetY: floorPt.y, top: a.state === "unknown" ? top - 10 : top, state: a.state, text, name: ident.shortName, muted: a.state === "offline" || (a.state === "idle" && !a.task) });
+  }
+
+  private drawRobotAt(ctx: Ctx, sp: PixelSpot) {
+    const r = this.robot!, running = r.state === "running";
+    const pt = P(sp.gx, sp.gy, 0);
+    drawShadow(ctx, pt.x, pt.y, this.pal.agentShadow, this.ringFor(this.opts.robot.id));
+    const top = drawRobot(ctx, pt.x, pt.y, running, this.tick, STATUS_DOT[r.state] ?? "#6B7285", this.opts.reducedMotion);
+    if (r.state === "unknown") drawQuestion(ctx, pt.x, top);
+    this.anchors.push({ id: this.opts.robot.id, floor: sp.floor, x: pt.x, feetY: pt.y, top: r.state === "unknown" ? top - 10 : top, state: r.state, text: r.label, name: "Claude Code CLI", muted: !running });
+  }
+
+  // ---------------- labels (spec 2.3.6) — drawn on the view canvas at display resolution ----------------
+  private drawLabels() {
+    const { ctx } = this, d = this.dpr;
+    interface Pill { a: Anchor; vx: number; vy: number; compact: boolean; w: number; text: string; y: number }
+    const pills: Pill[] = [];
+    ctx.font = `600 ${11 * d}px Inter, system-ui, sans-serif`;
+    for (const a of this.anchors) {
+      const panel = this.panels.find((p) => p.floor === a.floor);
+      if (!panel) continue;
+      const vx = panel.x + a.x * panel.s, vy = panel.y + a.top * panel.s - 8 * d;
+      // Hit box: sprite rect + 4 px padding (view px)
+      this.hits.push({ id: a.id, x0: vx - 6 * panel.s - 4 * d, x1: vx + 6 * panel.s + 4 * d, y0: vy, y1: panel.y + a.feetY * panel.s + 4 * d });
+      const hover = this.hovered === a.id;
+      const compact = panel.s / d < 1.5 && !hover;   // small scale (Overview/mobile): status dot only
+      const text = hover ? `${a.name} · ${a.text}` : truncate(a.text);
+      const w = compact ? 0 : Math.ceil(ctx.measureText(text).width) + (8 + 6 + 6 + 8) * d;
+      pills.push({ a, vx, vy, compact, w, text, y: vy });
+    }
+    // Collision: by y; an overlapping pill moves up 22 px (max 2 steps) and gets a leader line
+    pills.sort((p, q) => p.vy - q.vy);
+    const placed: { x0: number; x1: number; y0: number; y1: number }[] = [];
+    const H = 20 * d;
+    for (const pl of pills) {
+      if (pl.compact) continue;
+      for (let step = 0; step <= 2; step++) {
+        const y = pl.vy - step * 22 * d;
+        const box = { x0: pl.vx - pl.w / 2, x1: pl.vx + pl.w / 2, y0: y - 4 * d - H, y1: y };
+        const clash = placed.some((b) => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0);
+        if (!clash || step === 2) { pl.y = y; placed.push(box); break; }
+      }
+    }
+    // Hovered pill last so it is on top
+    pills.sort((p, q) => Number(this.hovered === p.a.id) - Number(this.hovered === q.a.id));
+    for (const pl of pills) {
+      const dot = STATUS_DOT[pl.a.state] ?? "#6B7285";
+      if (pl.compact) {
+        ctx.beginPath(); ctx.arc(pl.vx, pl.vy - 3 * d, 4 * d, 0, Math.PI * 2); ctx.fillStyle = "#FFFFFF"; ctx.fill();
+        ctx.beginPath(); ctx.arc(pl.vx, pl.vy - 3 * d, 3 * d, 0, Math.PI * 2); ctx.fillStyle = dot; ctx.fill();
+        continue;
+      }
+      this.drawPill(pl.vx, pl.y, pl.w, pl.text, dot, pl.a.muted && this.hovered !== pl.a.id, pl.y !== pl.vy ? pl.vy : null);
+      this.hits.push({ id: pl.a.id, x0: pl.vx - pl.w / 2, x1: pl.vx + pl.w / 2, y0: pl.y - 4 * d - H, y1: pl.y });
+    }
+  }
+
+  /** White pill with a hard 1-step shadow, tail, status dot and dark text. (x, bottomY) = tail tip. */
+  private drawPill(x: number, bottom: number, w: number, text: string, dot: string, muted: boolean, leaderTo: number | null) {
+    const { ctx } = this, d = this.dpr, H = 20 * d, r = 10 * d;
+    const x0 = Math.round(x - w / 2), y0 = Math.round(bottom - 4 * d - H);
+    ctx.save();
+    ctx.globalAlpha = muted ? 0.7 : this.tod === "night" ? 0.96 : 1;
+    if (leaderTo !== null) {
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(Math.round(x), Math.round(bottom), Math.max(1, Math.round(d)), Math.round(leaderTo - bottom));
+    }
+    const pill = (dy: number) => { ctx.beginPath(); roundRect(ctx, x0, y0 + dy, w, H, r); };
+    pill(2 * d); ctx.fillStyle = "rgba(0, 0, 0, 0.18)"; ctx.fill();          // hard drop shadow 0 2px
+    pill(0); ctx.fillStyle = "#FFFFFF"; ctx.fill();
+    if (this.tod === "day") { ctx.lineWidth = Math.max(1, d); ctx.strokeStyle = "rgba(31, 41, 55, 0.18)"; ctx.stroke(); }
+    ctx.beginPath();                                                            // tail 6 × 4
+    ctx.moveTo(x - 3 * d, y0 + H - 0.5); ctx.lineTo(x + 3 * d, y0 + H - 0.5); ctx.lineTo(x, y0 + H + 4 * d); ctx.closePath();
+    ctx.fillStyle = "#FFFFFF"; ctx.fill();
+    ctx.beginPath(); ctx.arc(x0 + 11 * d, y0 + H / 2, 3 * d, 0, Math.PI * 2); ctx.fillStyle = dot; ctx.fill();
+    ctx.fillStyle = "#1F2937"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.font = `600 ${11 * d}px Inter, system-ui, sans-serif`;
+    ctx.fillText(text, x0 + 20 * d, y0 + H / 2 + 0.5 * d);
+    ctx.restore();
+  }
+
+  private summary() {
+    const where = this.current === "overview" ? "both floors" : this.current === "lounge" ? "Floor 1 lounge" : "Floor 0 workspace";
+    const who = this.anchors.map((a) => `${a.name}: ${a.text}`).join("; ");
+    return `Pixel office, ${where}${who ? ` — ${who}` : ""}`;
+  }
+
+  // ---------------- picking (click a character → drawer, like voxel) ----------------
+  private hitAt(e: PointerEvent): string | null {
+    const r = this.canvas.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / (r.width || 1)) * this.canvas.width, y = ((e.clientY - r.top) / (r.height || 1)) * this.canvas.height;
+    for (let i = this.hits.length - 1; i >= 0; i--) {
+      const h = this.hits[i];
+      if (x >= h.x0 && x <= h.x1 && y >= h.y0 && y <= h.y1) return h.id;
+    }
+    return null;
+  }
+  private onMove = (e: PointerEvent) => {
+    const id = this.hitAt(e);
+    if (id !== this.hovered) { this.hovered = id; this.render(); }
+  };
+  private onDown = (e: PointerEvent) => { this.down = { x: e.clientX, y: e.clientY }; };
+  private onUp = (e: PointerEvent) => {
+    if (!this.down) return;
+    const moved = Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y);
+    this.down = null;
+    if (moved > 5) return;
+    const id = this.hitAt(e);
+    if (id) this.opts.onSelect(id);
+  };
+  private onLeave = () => { if (this.hovered) { this.hovered = null; this.render(); } };
 
   private drawSky(ctx: Ctx) {
     const p = this.pal;
@@ -316,8 +587,23 @@ export class PixelOfficeScene implements OfficeRenderer {
 
   // ---------------- lifecycle ----------------
   dispose() {
+    this.stopTick();
+    if (this.focusTimer) clearTimeout(this.focusTimer);
     this.ro.disconnect();
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    this.canvas.removeEventListener("pointermove", this.onMove);
+    this.canvas.removeEventListener("pointerdown", this.onDown);
+    this.canvas.removeEventListener("pointerup", this.onUp);
+    this.canvas.removeEventListener("pointerleave", this.onLeave);
     this.statics.clear();
+    this.furniture.clear();
     this.canvas.remove();
   }
+}
+
+/** Rounded-rect path (ctx.roundRect where available). */
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  if (typeof ctx.roundRect === "function") { ctx.roundRect(x, y, w, h, r); return; }
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }

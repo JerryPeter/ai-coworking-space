@@ -8,11 +8,11 @@ export type Ctx = CanvasRenderingContext2D;
 export interface Pt { x: number; y: number }
 
 /** Convex polygon fill by horizontal scanlines (sampled at pixel centres). */
-export function fillPoly(ctx: Ctx, pts: Pt[], color: string) {
+export function fillPoly(ctx: Ctx, pts: Pt[], color: string, rowStep = 1) {
   ctx.fillStyle = color;
   let minY = Infinity, maxY = -Infinity;
   for (const p of pts) { if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
-  for (let y = Math.floor(minY); y < Math.ceil(maxY); y++) {
+  for (let y = Math.floor(minY); y < Math.ceil(maxY); y += rowStep) {
     const yc = y + 0.5;
     let xl = Infinity, xr = -Infinity;
     for (let i = 0; i < pts.length; i++) {
