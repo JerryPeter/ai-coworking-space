@@ -16,6 +16,7 @@ import { hasSeat, loungeSpotFor } from "../office/layout";
 import type { RobotState } from "../office/characters";
 import { MODE_KEY, readMode, readTod, store, TOD_KEY, type OfficeMode, type TimeOfDay } from "../office/palettes";
 import { PixelOfficeScene } from "../office/PixelOfficeScene";
+import { lookFor } from "../office/pixel-characters";
 import type { OfficeRenderer } from "../office/types";
 import { AGENTS, CLAUDE, CLAUDE_ID, identity, rosterIndex } from "../theme/agents";
 
@@ -24,6 +25,29 @@ const robotState = (s: ToolState | undefined): RobotState => (s === "working" ? 
 const ROBOT_LABEL: Record<RobotState, string> = { running: "Running", not_running: "Not running", unknown: "Unknown" };
 const PRESET_LABEL: Record<Preset, string> = { overview: "Overview", workspace: "Floor 0 · Workspace", lounge: "Floor 1 · Lounge" };
 const ZONE_NAME = { tv: "TV corner", balcony: "Balcony", nap: "Rest room", commons: "Commons" } as const;
+
+/** Legend avatar in Pixel mode: the sprite's own colours (hat/hair, skin, shirt, pants) as pixel squares. */
+function PixelChip({ id }: { id: string }) {
+  if (id === CLAUDE_ID) {
+    return (
+      <svg className="pixel-chip" width={20} height={20} viewBox="0 0 10 10" shapeRendering="crispEdges" aria-hidden="true">
+        <rect x={4} y={0} width={2} height={1} fill="#F97316" /><rect x={1} y={1} width={8} height={4} fill="#2B2F3A" />
+        <rect x={2} y={2} width={6} height={2} fill="#0F172A" /><rect x={3} y={2} width={1} height={1} fill="#F97316" />
+        <rect x={5} y={3} width={2} height={1} fill="#F97316" /><rect x={2} y={5} width={6} height={3} fill="#F97316" />
+        <rect x={1} y={8} width={8} height={2} fill="#374151" />
+      </svg>
+    );
+  }
+  const l = lookFor(id, identity(id).hex);
+  const hat = l.kind === "bagas" ? "#4D7C0F" : l.kind === "susi" ? "#DB2777" : l.hair;
+  return (
+    <svg className="pixel-chip" width={20} height={20} viewBox="0 0 10 10" shapeRendering="crispEdges" aria-hidden="true">
+      <rect x={2} y={0} width={6} height={2} fill={hat} /><rect x={3} y={2} width={4} height={3} fill={l.skin} />
+      <rect x={2} y={2} width={1} height={2} fill={l.hair} /><rect x={7} y={2} width={1} height={2} fill={l.hair} />
+      <rect x={1} y={5} width={8} height={3} fill={l.body} /><rect x={3} y={8} width={4} height={2} fill={l.pants} />
+    </svg>
+  );
+}
 
 export default function Office() {
   const office = useApi(endpoints.office, 5_000);
@@ -179,7 +203,7 @@ export default function Office() {
             <button key={r.id} className="legend-row" disabled={!r.seat}
               onClick={() => { scene.current?.focus(r.id); setParams({ agent: r.id, tab: null }); }}
               title={r.seat ? `Focus ${r.name}` : "No desk assigned in the office layout"}>
-              <PixelAvatar id={r.id} size={20} tile={false} />
+              {mode === "pixel" ? <PixelChip id={r.id} /> : <PixelAvatar id={r.id} size={20} tile={false} />}
               <span className="nm truncate">{r.name}</span>
               {r.badge}
               <span className="xs secondary">{r.label}</span>
@@ -187,7 +211,7 @@ export default function Office() {
           ))}
           {office.error && <div className="xs" style={{ color: "var(--outcome-failed)", padding: "4px 6px" }}>{office.error.message}</div>}
         </div>
-        <div className="ov ov-bl">Drag to orbit · Scroll to zoom · Click a character for details · Use the floor buttons to switch floors</div>
+        <div className="ov ov-bl">{mode === "pixel" ? "Click to focus · Floor buttons change view" : "Drag to orbit · Scroll to zoom · Click a character for details · Use the floor buttons to switch floors"}</div>
         <div className="ov ov-br tabular">
           {office.updatedAt ? `State updated ${relative(office.updatedAt, now)} · every 5s` : "Loading state…"}
         </div>
