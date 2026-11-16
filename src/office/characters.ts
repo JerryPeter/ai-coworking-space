@@ -2,7 +2,7 @@
 // textures. Each character is a root Group with pivot groups; animation only moves pivots.
 import * as THREE from "three";
 import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
-import { DESKS, FLOOR_H, loungeSpotFor, ROBOT_POS } from "./layout";
+import { deskToLounge, DESKS, floorOfY, floorY, loungeSpotFor, ROBOT_POS, type FloorId, type LoungeSpot, type Spot } from "./layout";
 
 const DEG = Math.PI / 180;
 const TAU = Math.PI * 2;
@@ -235,6 +235,36 @@ const LOOKS: Record<string, HumanLook> = {
 type Loc = "desk" | "lounge";
 type Phase = "sit" | "rise" | "walk" | "lower";
 
+/** Pivot-only pose parameters (tech plan 4.5, Susi spec 4.1). */
+interface PoseParams { yOff: number; hip: number; pitch: number; arm: number }
+const STAND: PoseParams = { yOff: 0, hip: 0, pitch: 0, arm: 0 };
+// Edge-of-daybed sit (cushion top 0.7 → yOff 0.7 − 1.25): the first half of "sit down, then lie back".
+const NAP_SIT: PoseParams = { yOff: -0.55, hip: -90 * DEG, pitch: 0, arm: 0 };
+function poseOf(spot: Spot): PoseParams {
+  switch (spot.pose) {
+    case "sit": return { yOff: spot.yOff, hip: -90 * DEG, pitch: 0, arm: spot.yOff <= -0.5 ? -20 * DEG : 0 }; // sofa: hands on lap
+    case "lean": return { yOff: spot.yOff, hip: 0, pitch: 12 * DEG, arm: -45 * DEG };                     // forearms on the cap rail
+    case "lie": return { yOff: spot.yOff, hip: 0, pitch: -90 * DEG, arm: 0 };                              // on the back, face up
+    default: return { ...STAND, yOff: spot.yOff };
+  }
+}
+function lerpPose(a: PoseParams, b: PoseParams, e: number, out: PoseParams) {
+  out.yOff = a.yOff + (b.yOff - a.yOff) * e;
+  out.hip = a.hip + (b.hip - a.hip) * e;
+  out.pitch = a.pitch + (b.pitch - a.pitch) * e;
+  out.arm = a.arm + (b.arm - a.arm) * e;
+  return out;
+}
+/** Blend standing → settled pose at `spot` (e: 0 = standing, 1 = settled). Lie goes via an edge sit. */
+function blendInto(spot: Spot, e: number, out: PoseParams) {
+  if (spot.pose !== "lie") return lerpPose(STAND, poseOf(spot), e, out);
+  return e < 0.5 ? lerpPose(STAND, NAP_SIT, e * 2, out) : lerpPose(NAP_SIT, poseOf(spot), (e - 0.5) * 2, out);
+}
+const settleTime = (spot: Spot) => (spot.pose === "lie" ? 0.5 : 0.3);
+
+// Task 3: every state change teleports. Task 5 turns the stair walk on.
+const WALK_ENABLED = false;
+
 export class Human extends BaseCharacter {
   hipL = new THREE.Group(); hipR = new THREE.Group();
   shL = new THREE.Group(); shR = new THREE.Group();
@@ -243,11 +273,12 @@ export class Human extends BaseCharacter {
   private loc: Loc = "desk";        // where the character is (or is heading when walking)
   private phase: Phase = "sit";
   private p = 0;                    // progress for rise/lower
-  private path: THREE.Vector2[] = [];
+  private path: THREE.Vector3[] = [];
   private next = 0;
-  private pos = new THREE.Vector2();
+  private pos = new THREE.Vector3(); // feet position on the floor surface (world)
   private yaw = 0;
-  private hip = -90 * DEG;
+  private pose: PoseParams = { ...STAND };
+  private fromSpot!: Spot;          // where the current rise started
   private armBase = 0;
   private initialized = false;
 
@@ -256,6 +287,7 @@ export class Human extends BaseCharacter {
 
   constructor(o: CharacterOpts, geo: GeoCache) {
     super(o, geo);
+    this.root.rotation.order = "YXZ"; // yaw first, then pitch (lean / lie)
     const look = LOOKS[o.id];
     const shirt = this.mat(look.shirt), pants = this.mat(look.pants), skin = this.mat("#D4A373"), hair = this.mat(look.hair);
     // Legs (pivot at hip)
@@ -290,42 +322,49 @@ export class Human extends BaseCharacter {
 
   headY() { return 4.0; } // head center, root-local
 
-  // Interim (task 1): desk from DESKS, lounge spot on Floor 1. Replaced by spots/poses in task 3.
-  private seat(loc: Loc) {
-    const d = DESKS[this.id], l = loungeSpotFor(this.id);
-    return loc === "desk" ? { x: d.x, z: d.z, y: -0.25, yaw: 0 } : { x: l.x, z: l.z, y: FLOOR_H - 0.75, yaw: l.yaw };
+  spot(loc: Loc): Spot { return loc === "desk" ? DESKS[this.id] : loungeSpotFor(this.id); }
+  /** Floor the character is on right now (drives visibility and picking). */
+  floor(): FloorId { return floorOfY(this.pos.y); }
+  /** Seated (settled) at the desk: the desk name label hides only then. */
+  atDesk() { return this.loc === "desk" && this.phase === "sit"; }
+  /** Settled lounge spot, or null while walking / at the desk. */
+  settledLounge(): LoungeSpot | null { return this.loc === "lounge" && this.phase === "sit" ? loungeSpotFor(this.id) : null; }
+
+  private buildPath(from: Loc, to: Loc): THREE.Vector3[] {
+    const v = deskToLounge(this.id, this.index).map(([x, y, z]) => new THREE.Vector3(x, y, z));
+    return from === "desk" && to === "lounge" ? v : v.reverse();
   }
 
-  private buildPath(from: Loc, to: Loc): THREE.Vector2[] {
-    const d = DESKS[this.id], l = loungeSpotFor(this.id);
-    const pts: [number, number][] = [[d.x, d.z], d.exit, [l.x, l.z]];
-    const v = pts.map(([x, z]) => new THREE.Vector2(x, z));
-    return from === "desk" && to === "lounge" ? v : v.reverse();
+  private settle(loc: Loc) {
+    const st = this.spot(loc);
+    this.loc = loc; this.phase = "sit"; this.p = 1;
+    this.pos.set(st.x, floorY(st.floor), st.z);
+    this.yaw = st.yaw;
+    Object.assign(this.pose, poseOf(st));
   }
 
   setState(state: HumanState) {
     this.state = state;
     const want: Loc = state === "idle" ? "lounge" : "desk";
-    if (!this.initialized || this.reducedMotion) {
-      // Initial load (and reduced motion): appear at the destination, no walking.
+    if (!this.initialized || this.reducedMotion || !WALK_ENABLED) {
+      // Initial load, reduced motion (and task 3): appear at the destination, no walking.
       this.initialized = true;
-      this.loc = want; this.phase = "sit"; this.p = 1;
-      const st = this.seat(want);
-      this.pos.set(st.x, st.z); this.yaw = st.yaw; this.hip = -90 * DEG;
-      this.root.position.set(st.x, st.y, st.z);
+      this.settle(want);
       this.update(0, 0, true);
       return;
     }
     if (want === this.loc) return; // already there or already heading there
     if (this.phase === "sit") {
+      this.fromSpot = this.spot(this.loc);
       this.path = this.buildPath(this.loc, want); this.next = 1;
       this.loc = want; this.phase = "rise"; this.p = 0;
     } else if (this.phase === "lower") {
-      // Was sitting down at the old loc; stand back up and leave.
+      // Was settling at the old loc; stand back up and leave.
+      this.fromSpot = this.spot(this.loc);
       this.path = this.buildPath(this.loc, want); this.next = 1;
       this.loc = want; this.phase = "rise"; this.p = 1 - this.p;
     } else if (this.phase === "rise") {
-      // Changed mind while standing up: sit back down where we are.
+      // Changed mind while standing up: settle back down where we are.
       this.loc = want; this.phase = "lower"; this.p = 1 - this.p;
     } else {
       // New state arrived mid-walk: reverse from the current position along the path walked (no teleport).
@@ -343,53 +382,45 @@ export class Human extends BaseCharacter {
   update(dt: number, time: number, instant = false) {
     const t = time + this.index * 0.37;
     const rm = this.reducedMotion;
-    const st = this.seat(this.loc);
+    const st = this.spot(this.loc);
     let walking = false;
 
     if (this.phase === "rise") {
-      this.p = Math.min(1, this.p + dt / 0.3);
-      const from = this.seat(this.loc === "desk" ? "lounge" : "desk");
-      const e = easeInOut(this.p);
-      this.root.position.y = THREE.MathUtils.lerp(from.y, 0, e);
-      this.hip = THREE.MathUtils.lerp(-90 * DEG, 0, e);
+      this.p = Math.min(1, this.p + dt / settleTime(this.fromSpot));
+      blendInto(this.fromSpot, 1 - easeInOut(this.p), this.pose);
       if (this.p >= 1) { this.phase = "walk"; }
     } else if (this.phase === "walk") {
       walking = true;
-      this.root.position.y = 0;
-      this.hip = 0;
-      let step = 4 * dt; // 4 u/s
+      Object.assign(this.pose, STAND);
+      let step = 4 * dt; // 4 u/s along the 3D path
       while (step > 0 && this.next < this.path.length) {
         const target = this.path[this.next];
-        const dx = target.x - this.pos.x, dz = target.y - this.pos.y;
-        const dist = Math.hypot(dx, dz);
-        if (dist > 1e-4) {
+        const dx = target.x - this.pos.x, dy = target.y - this.pos.y, dz = target.z - this.pos.z;
+        const dist = Math.hypot(dx, dy, dz);
+        if (Math.hypot(dx, dz) > 1e-4) {
           const desired = Math.atan2(dx, dz);
           this.yaw += wrapAngle(desired - this.yaw) * Math.min(1, dt / 0.15);
         }
         if (dist <= step) { this.pos.copy(target); this.next += 1; step -= dist; }
-        else { this.pos.x += (dx / dist) * step; this.pos.y += (dz / dist) * step; step = 0; }
+        else { this.pos.addScaledVector(new THREE.Vector3(dx, dy, dz), step / dist); step = 0; }
       }
       if (this.next >= this.path.length) { this.phase = "lower"; this.p = 0; }
     } else if (this.phase === "lower") {
-      this.p = Math.min(1, this.p + dt / 0.3);
-      const e = easeInOut(this.p);
-      this.root.position.y = THREE.MathUtils.lerp(0, st.y, e);
-      this.hip = THREE.MathUtils.lerp(0, -90 * DEG, e);
+      this.p = Math.min(1, this.p + dt / settleTime(st));
+      blendInto(st, easeInOut(this.p), this.pose);
       this.yaw += wrapAngle(st.yaw - this.yaw) * Math.min(1, dt / 0.15);
       if (this.p >= 1) { this.phase = "sit"; this.yaw = st.yaw; }
     } else {
-      this.root.position.y = st.y;
-      this.hip = -90 * DEG;
-      this.pos.set(st.x, st.z);
+      this.pos.set(st.x, floorY(st.floor), st.z);
       this.yaw = st.yaw;
+      Object.assign(this.pose, poseOf(st));
     }
-    this.root.position.x = this.pos.x;
-    this.root.position.z = this.pos.y;
-    this.root.rotation.y = this.yaw;
+    this.root.position.set(this.pos.x, this.pos.y + this.pose.yOff, this.pos.z);
+    this.root.rotation.set(this.pose.pitch, this.yaw, 0);
 
     // Limbs: the base pose is smoothed; the oscillation is added unfiltered so amplitudes match the spec.
     const seatedHere = this.phase === "sit";
-    let base = 0, oscL = 0, oscR = 0, headX = 0, headY = 0, neckY = 3.5, legSwing = 0;
+    let base = this.pose.arm, oscL = 0, oscR = 0, headX = 0, headY = 0, neckY = 3.5, legSwing = 0;
     if (walking && !rm) {
       const s = Math.sin((TAU * t) / 0.6);
       legSwing = 30 * DEG * s;
@@ -410,8 +441,8 @@ export class Human extends BaseCharacter {
     this.armBase += (base - this.armBase) * k;
     this.shL.rotation.x = this.armBase + oscL;
     this.shR.rotation.x = this.armBase + oscR;
-    this.hipL.rotation.x = this.hip + legSwing;
-    this.hipR.rotation.x = this.hip - legSwing;
+    this.hipL.rotation.x = this.pose.hip + legSwing;
+    this.hipR.rotation.x = this.pose.hip - legSwing;
     // Head: oscillating motions (working nod, reviewing scan) are set directly; settling is smoothed.
     const headDirect = seatedHere && (this.state === "working" || this.state === "reviewing") && !rm;
     this.neck.rotation.x = headDirect && this.state === "working" ? headX : this.neck.rotation.x + (headX - this.neck.rotation.x) * k;

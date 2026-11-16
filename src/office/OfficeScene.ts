@@ -50,6 +50,7 @@ export class OfficeScene {
   private floor1: Floor1;
   private geo = new GeoCache();
   private chars = new Map<string, Character>();
+  private agentGroup = new THREE.Group();
   private pickables: THREE.Mesh[] = [];
   private ray = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -104,15 +105,19 @@ export class OfficeScene {
     this.floor1 = buildFloor1();
     this.scene.add(this.floor0.group, this.floor1.group);
 
-    // Characters (only profiles that have a seat in the spec layout)
+    // Characters live in ONE world-space group and change floor by world Y (tech plan 3.3), so a
+    // walker can cross floors on the stair without re-parenting. Floor-1 spots are authored in
+    // floor-local coordinates and placed at world y = local y + FLOOR_H via floorY().
+    this.agentGroup.name = "agents";
+    this.scene.add(this.agentGroup);
     opts.characters.filter((c) => hasSeat(c.id)).forEach((c) => {
       const h = new Human({ id: c.id, index: c.index, agentHex: c.hex, reducedMotion: opts.reducedMotion }, this.geo);
       this.chars.set(c.id, h);
-      this.scene.add(h.root);
+      this.agentGroup.add(h.root);
     });
     const r = new Robot({ id: opts.robot.id, index: opts.robot.index, agentHex: opts.robot.hex, reducedMotion: opts.reducedMotion }, this.geo);
     this.chars.set(opts.robot.id, r);
-    this.scene.add(r.root);
+    this.agentGroup.add(r.root);
     this.chars.forEach((c) => this.pickables.push(...c.meshes));
 
     // Input
@@ -229,6 +234,8 @@ export class OfficeScene {
 
     if (this.mouseDirty) { this.mouseDirty = false; this.pick(); }
     this.chars.forEach((c) => c.update(dt, this.elapsed));
+    // "<Name>'s desk" shows only while that agent is away from the desk (spec 2.B).
+    this.chars.forEach((c, id) => { const l = this.floor0.deskLabels[id]; if (l && c instanceof Human) l.visible = !c.atDesk(); });
 
     // Desk screens / strips lerp over ~1s
     const a = 1 - Math.exp(-dt * 4.5);
