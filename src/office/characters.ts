@@ -36,6 +36,9 @@ const tmpC = new THREE.Color();
 const tmpE = new THREE.Color();
 const tmpH = new THREE.Color();
 const BLACK = new THREE.Color(0, 0, 0);
+const tmpV = new THREE.Vector3();
+const tmpV2 = new THREE.Vector3();
+const TV_AT: [number, number] = [-19.7, -7.0]; // TV screen center (x, z), spec 4.1 "TV look"
 
 function approach(dt: number, rate = 5) { return 1 - Math.exp(-dt * rate); }
 function easeInOut(p: number) { return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; }
@@ -145,7 +148,16 @@ abstract class BaseCharacter {
   }
   protected qBaseY = 0;
 
+  private tagArgs: [string, string, string, boolean] | null = null;
+  protected activity: string | null = null;
   setTag(name: string, status: string, dot: string, dim: boolean) {
+    const same = this.tagArgs && this.tagArgs.join("|") === [name, status, dot, dim].join("|");
+    this.tagArgs = [name, status, dot, dim];
+    if (!same) this.renderTag();
+  }
+  protected renderTag() {
+    if (!this.tagArgs) return;
+    const [name, status, dot, dim] = this.tagArgs;
     this.tagEl.innerHTML = "";
     const d = document.createElement("span");
     d.style.cssText = `width:8px;height:8px;border-radius:${this instanceof Robot ? "2px" : "50%"};background:${dot};display:inline-block`;
@@ -153,7 +165,7 @@ abstract class BaseCharacter {
     n.textContent = name;
     const s = document.createElement("span");
     s.className = "st";
-    s.textContent = `· ${status}`;
+    s.textContent = `· ${status}${this.activity ? ` · ${this.activity}` : ""}`;
     this.tagEl.append(d, n, s);
     this.tagEl.classList.toggle("dim", dim);
   }
@@ -281,6 +293,8 @@ export class Human extends BaseCharacter {
   private fromSpot!: Spot;          // where the current rise started
   private armBase = 0;
   private initialized = false;
+  private torso!: THREE.Mesh;
+  private zzz!: CSS2DObject;
 
   matPublic(hex: string, role: Role = "normal", e?: string, ei = 0) { return this.mat(hex, role, e, ei); }
   boxPublic(parent: THREE.Object3D, w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material) { return this.box(parent, w, h, d, x, y, z, m); }
@@ -295,7 +309,7 @@ export class Human extends BaseCharacter {
     this.box(this.hipL, 0.5, 1.5, 0.5, 0, -0.75, 0, pants);
     this.box(this.hipR, 0.5, 1.5, 0.5, 0, -0.75, 0, pants);
     // Body
-    this.box(this.root, 1.0, 2.0, 0.5, 0, 2.5, 0, shirt);
+    this.torso = this.box(this.root, 1.0, 2.0, 0.5, 0, 2.5, 0, shirt);
     // Arms (pivot at shoulder)
     this.shL.position.set(-0.75, 3.25, 0); this.shR.position.set(0.75, 3.25, 0);
     this.box(this.shL, 0.5, 1.5, 0.5, 0, -0.5, 0, shirt);
@@ -318,6 +332,14 @@ export class Human extends BaseCharacter {
     this.finishQBox(5.15);
     this.tag.position.set(0, 5.4, 0);
     this.root.add(this.tag);
+    // Nap "z z z" (spec 4.2): CSS2D, no draw call; CSS animates the glyphs (static in reduced motion).
+    const zz = document.createElement("div");
+    zz.className = `zzz${o.reducedMotion ? " still" : ""}`;
+    zz.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < 3; i++) { const g = document.createElement("span"); g.textContent = "z"; g.style.animationDelay = `${i * 0.8}s`; zz.append(g); }
+    this.zzz = new CSS2DObject(zz);
+    this.zzz.visible = false;
+    this.root.add(this.zzz);
   }
 
   headY() { return 4.0; } // head center, root-local
@@ -420,7 +442,9 @@ export class Human extends BaseCharacter {
 
     // Limbs: the base pose is smoothed; the oscillation is added unfiltered so amplitudes match the spec.
     const seatedHere = this.phase === "sit";
-    let base = this.pose.arm, oscL = 0, oscR = 0, headX = 0, headY = 0, neckY = 3.5, legSwing = 0;
+    const zone = this.settledLounge();
+    let base = this.pose.arm, oscL = 0, oscR = 0, headX = 0, headY = 0, headZ = 0, neckY = 3.5, legSwing = 0;
+    let rootRoll = 0, rootBob = 0, chest = 1;
     if (walking && !rm) {
       const s = Math.sin((TAU * t) / 0.6);
       legSwing = 30 * DEG * s;
@@ -434,20 +458,58 @@ export class Human extends BaseCharacter {
       base = -50 * DEG;
       headY = rm ? 0 : 10 * DEG * Math.sin((TAU * t) / 3);
       headX = 8 * DEG;
+    } else if (zone) {
+      // Idle zone loops (spec 4.2 + task brief amplitudes). Reduced motion holds the pose.
+      if (zone.zone === "tv") {
+        if (zone.yaw === 0) headY = THREE.MathUtils.clamp(wrapAngle(Math.atan2(TV_AT[0] - zone.x, TV_AT[1] - zone.z) - zone.yaw), -45 * DEG, 45 * DEG);
+        if (!rm) {
+          neckY = 3.5 + 0.03 * Math.sin((TAU * t) / 3);              // gentle head bob ±0.03 u, 3 s
+          headZ = 5 * DEG * Math.sin((TAU * t) / 8);                  // head tilt ±5°, peaks every ~4 s
+          const period = 12 + ((this.index * 3.7) % 8), ph = t % period; // occasional laugh: 0.4 s shoulder bounce
+          if (ph < 0.4) { const b = -10 * DEG * Math.sin((Math.PI * ph) / 0.4); oscL = b; oscR = b; }
+        }
+      } else if (zone.zone === "balcony" && zone.pose === "lean") {
+        if (!rm) {
+          rootRoll = 2 * DEG * Math.sin((TAU * t) / 4);              // weight shift ±2°, 4 s
+          rootBob = 0.02 * Math.sin((TAU * t) / 2.5);                 // sway ±0.02 u, 2.5 s
+          headY = 15 * DEG * Math.sin((TAU * t) / 6);                 // looking at the city ±15°, 6 s
+        }
+      } else if (zone.zone === "balcony") {
+        if (!rm) headY = 10 * DEG * Math.sin((TAU * t) / 5);         // bistro chat
+      } else if (zone.zone === "nap") {
+        if (!rm) {
+          headX = 3 * DEG * Math.sin((TAU * t) / 4);                  // breathing ±3°, 4 s
+          chest = 0.985 + 0.015 * Math.sin((TAU * t) / 4);            // chest scale 0.97–1.0, 4 s
+        }
+      } else if (!rm) {
+        neckY = 3.5 + 0.03 * Math.sin((TAU * t) / 3);
+      }
     } else if (seatedHere && this.state === "idle") {
       neckY = 3.5 + (rm ? 0 : 0.05 * Math.sin((TAU * t) / 2));
     }
+    this.root.rotation.z = rootRoll;
+    this.root.position.y += rootBob;
+    this.torso.scale.z = chest;  // torso depth = vertical when lying on the back
     const k = instant ? 1 : approach(dt, 12);
     this.armBase += (base - this.armBase) * k;
     this.shL.rotation.x = this.armBase + oscL;
     this.shR.rotation.x = this.armBase + oscR;
     this.hipL.rotation.x = this.pose.hip + legSwing;
     this.hipR.rotation.x = this.pose.hip - legSwing;
-    // Head: oscillating motions (working nod, reviewing scan) are set directly; settling is smoothed.
-    const headDirect = seatedHere && (this.state === "working" || this.state === "reviewing") && !rm;
-    this.neck.rotation.x = headDirect && this.state === "working" ? headX : this.neck.rotation.x + (headX - this.neck.rotation.x) * k;
-    this.neck.rotation.y = headDirect && this.state === "reviewing" ? headY : this.neck.rotation.y + (headY - this.neck.rotation.y) * k;
+    // Head: oscillating motions are set directly; settling into a new target is smoothed.
+    const headDirect = !rm && (seatedHere && (this.state === "working" || this.state === "reviewing") || !!zone);
+    this.neck.rotation.x = headDirect ? headX : this.neck.rotation.x + (headX - this.neck.rotation.x) * k;
+    this.neck.rotation.y = headDirect ? headY : this.neck.rotation.y + (headY - this.neck.rotation.y) * k;
+    this.neck.rotation.z = headDirect ? headZ : this.neck.rotation.z + (headZ - this.neck.rotation.z) * k;
     this.neck.position.y = neckY;
+
+    // Tag + "z z z" sit above the head in WORLD up, whatever the pose (lying turns local +y sideways).
+    if (zone?.activity !== this.activity) { this.activity = zone?.activity ?? null; this.renderTag(); }
+    this.zzz.visible = zone?.zone === "nap";
+    this.root.updateMatrixWorld();
+    const head = this.headWorld(tmpV);
+    this.tag.position.copy(this.root.worldToLocal(tmpV2.copy(head).setY(head.y + (this.qScale > 0.5 ? 2.05 : 1.4))));
+    if (this.zzz.visible) this.zzz.position.copy(this.root.worldToLocal(tmpV2.copy(head).setY(head.y + 1.6)));
 
     // Colors (spec 7.3): idle = base × 0.8; offline = gray setScalar(0.4), accessory emissive off.
     const state = this.state;
@@ -459,7 +521,6 @@ export class Human extends BaseCharacter {
     }, instant);
 
     this.updateQBox(dt, t, state === "unknown");
-    this.tag.position.y = this.qScale > 0.5 ? 6.05 : 5.4;
   }
 }
 

@@ -25,6 +25,9 @@ const OFF = new THREE.Color(0, 0, 0);
 const BENCH_SCREEN = new THREE.Color("#F97316").multiplyScalar(0.6);
 const BENCH_STRIP = new THREE.Color("#F97316");
 
+const TV_STANDBY = new THREE.Color("#1E293B");
+const TV_CYCLE = ["#5B7CFA", "#2DD4BF", "#A78BFA"].map((h) => new THREE.Color(h));
+
 function easeInOutCubic(p: number) { return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
 
 export function webglAvailable(): boolean {
@@ -51,6 +54,7 @@ export class OfficeScene {
   private geo = new GeoCache();
   private chars = new Map<string, Character>();
   private agentGroup = new THREE.Group();
+  private tvTarget = new THREE.Color();
   private pickables: THREE.Mesh[] = [];
   private ray = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -253,6 +257,16 @@ export class OfficeScene {
       if (this.ledTimers[i] <= 0) { this.ledOn[i] = !this.ledOn[i]; this.ledTimers[i] = 0.5 + Math.random() * 1.5; }
       if (this.ledOn[i]) led.mat.emissive.set("#F97316").multiplyScalar(0.4); else led.mat.emissive.setScalar(0);
     });
+
+    // TV (spec 8.4): slow accent cycle while someone is watching, dim standby otherwise.
+    const watching = [...this.chars.values()].some((c) => c instanceof Human && c.settledLounge()?.zone === "tv");
+    if (!watching) this.tvTarget.set(TV_STANDBY).multiplyScalar(0.08);
+    else if (this.opts.reducedMotion) this.tvTarget.set(TV_CYCLE[0]).multiplyScalar(0.45);
+    else {
+      const u = ((this.elapsed / 8) % 1) * 3, i = Math.floor(u);
+      this.tvTarget.copy(TV_CYCLE[i]).lerp(TV_CYCLE[(i + 1) % 3], u - i).multiplyScalar(0.55);
+    }
+    this.floor1.tv.mat.emissive.lerp(this.tvTarget, this.opts.reducedMotion ? 1 : a);
 
     // Name tags hide when zoomed far out, except the hovered one.
     const far = this.camera.position.distanceTo(this.controls.target) > 24;

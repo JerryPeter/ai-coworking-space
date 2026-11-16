@@ -424,6 +424,15 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text-primar
 .zonelabel { font-family: var(--font-sans); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #6B7285; white-space: nowrap; pointer-events: none; transition: opacity var(--dur-base); }
 .zonelabel.sign { text-transform: none; letter-spacing: 0; color: #A3A9B8; background: rgba(26, 30, 40, 0.7); padding: 2px 8px; border-radius: var(--radius-pill); }
 .zonelabel.hidden, .desklabel.hidden { opacity: 0; }
+.zzz { position: relative; width: 24px; height: 28px; pointer-events: none; font-family: var(--font-sans); font-weight: 700; color: #8394AE; }
+.zzz span { position: absolute; left: 0; bottom: 0; font-size: 13px; opacity: 0; animation: zzz-rise 2.4s ease-out infinite; }
+.zzz span:nth-child(2) { left: 7px; font-size: 11px; }
+.zzz span:nth-child(3) { left: 13px; font-size: 9px; }
+.zzz.still span { animation: none; opacity: 0.8; }
+.zzz.still span:nth-child(2) { bottom: 8px; }
+.zzz.still span:nth-child(3) { bottom: 16px; }
+@keyframes zzz-rise { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: 0.9; } 100% { transform: translateY(-16px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .zzz span { animation: none; opacity: 0.8; } }
 .desklabel { font-family: var(--font-sans); font-size: 11px; font-weight: 500; color: #A3A9B8; background: rgba(26, 30, 40, 0.6); padding: 1px 7px; border-radius: var(--radius-pill); white-space: nowrap; pointer-events: none; opacity: 0.7; }
 .webgl-fallback { padding: var(--space-6); }
 table.simple { border-collapse: collapse; width: 100%; font-size: var(--text-sm); }
