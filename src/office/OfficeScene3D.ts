@@ -125,6 +125,33 @@ function ago(ms: number) {
   const h = Math.floor(m / 60);
   return h < 48 ? h + " jam lalu" : Math.floor(h / 24) + " hari lalu";
 }
+const SIDEBAR_KEY = "mc.office.sidebarOpen";
+function readSidebarOpen() {
+  try { return localStorage.getItem(SIDEBAR_KEY) !== "false"; } catch { return true; }
+}
+const hex6 = (n: number) => "#" + n.toString(16).padStart(6, "0");
+/** 8x8 Minecraft-style head (hair, skin, eyes, shirt strip) or a ">_" terminal for Claude CLI. */
+function drawFace(robot: boolean, skin: string, hair: string, shirt: string): string {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d");
+  if (!g) return "";
+  g.imageSmoothingEnabled = false;
+  if (robot) {
+    g.fillStyle = "#1c1f26"; g.fillRect(0, 0, 64, 64);
+    g.fillStyle = "#2c313c"; g.fillRect(0, 0, 64, 10);
+    g.fillStyle = CLAUDE_COLOR; g.font = "700 30px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+    g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(">_", 32, 38);
+    return c.toDataURL();
+  }
+  const px = (x: number, y: number, w: number, h: number, col: string) => { g.fillStyle = col; g.fillRect(x * 8, y * 8, w * 8, h * 8); };
+  px(0, 0, 8, 8, hair);            // hair block = background
+  px(1, 2, 6, 5, skin); px(0, 4, 8, 3, skin);   // face, sideburns above row 4
+  px(1, 4, 2, 1, "#ffffff"); px(5, 4, 2, 1, "#ffffff");  // eye whites
+  px(2, 4, 1, 1, "#1c1c1c"); px(5, 4, 1, 1, "#1c1c1c");  // pupils (looking inward)
+  g.fillStyle = "rgba(0,0,0,.22)"; g.fillRect(3 * 8, 6 * 8 - 3, 2 * 8, 3); // mouth
+  px(0, 7, 8, 1, shirt);           // shirt strip
+  return c.toDataURL();
+}
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -180,7 +207,10 @@ export class OfficeScene3D {
   private opts: SceneOptions;
 
   // DOM: roster + detail panel (the reference's right-hand panel), owned by the scene.
-  private ui: { root: HTMLElement; title: HTMLElement; tally: HTMLElement; list: HTMLUListElement; detail: HTMLElement; dl: HTMLDListElement; dName: HTMLElement };
+  private ui: { root: HTMLElement; toggle: HTMLButtonElement; title: HTMLElement; tally: HTMLElement; list: HTMLUListElement; detail: HTMLElement; dl: HTMLDListElement; dName: HTMLElement };
+  private sidebarOpen = readSidebarOpen();
+  /** Roster face icons (data URLs), keyed by everything that changes the drawing. */
+  private faces = new Map<string, string>();
 
   constructor(private host: HTMLElement, opts: SceneOptions = {}) {
     this.opts = opts;
@@ -305,7 +335,7 @@ export class OfficeScene3D {
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     c.remove();
-    this.ui.root.remove();
+    this.ui.root.remove(); this.ui.toggle.remove();
     THREE.ColorManagement.enabled = this.prevColorManagement;
   }
 
@@ -1017,9 +1047,47 @@ export class OfficeScene3D {
     h3.append(dName, close);
     const dl = el("dl");
     detail.append(h3, dl);
+    root.id = "o3d-roster-" + Math.random().toString(36).slice(2, 8);
     root.append(header, list, detail);
-    this.host.appendChild(root);
-    return { root, title, tally, list, detail, dl, dName };
+    const toggle = el("button", "ov o3d-toggle"); toggle.type = "button";
+    toggle.setAttribute("aria-controls", root.id);
+    toggle.addEventListener("click", () => this.setSidebar(!this.sidebarOpen));
+    this.host.append(root, toggle);
+    const ui = { root, toggle, title, tally, list, detail, dl, dName };
+    this.applySidebar(ui);
+    return ui;
+  }
+  private applySidebar(ui = this.ui) {
+    const open = this.sidebarOpen;
+    ui.root.classList.toggle("closed", !open);
+    ui.root.toggleAttribute("inert", !open);
+    ui.root.setAttribute("aria-hidden", open ? "false" : "true");
+    ui.toggle.classList.toggle("closed", !open);
+    ui.toggle.textContent = open ? "✕" : "☰";
+    ui.toggle.title = open ? "Sembunyikan daftar agent" : "Tampilkan daftar agent";
+    ui.toggle.setAttribute("aria-label", ui.toggle.title);
+    ui.toggle.setAttribute("aria-expanded", String(open));
+  }
+  private setSidebar(open: boolean) {
+    if (open === this.sidebarOpen) return;
+    this.sidebarOpen = open;
+    try { localStorage.setItem(SIDEBAR_KEY, String(open)); } catch { /* storage unavailable */ }
+    this.applySidebar();
+    // The default views leave room for the panel on wide screens; slide the camera by that same
+    // margin (keeping any user orbit) so the scene re-centres in the full-width canvas.
+    if (this.wide()) {
+      const d = new THREE.Vector3(open ? 2.6 : -2.6, 0, 0), base = this.tween;
+      const t = (base ? base.tt : this.controls.target).clone().add(d), p = (base ? base.tp : this.camera.position).clone().add(d);
+      this.flyTo(t, p);
+    }
+  }
+  private faceIcon(a: Agent3D) {
+    const robot = a.data.id === CLAUDE_AGENT_ID;
+    const skin = hex6(SKINS[a.deskIdx % SKINS.length]), hair = hex6(HAIRS[(a.deskIdx * 5 + 2) % HAIRS.length]);
+    const key = robot ? "robot" : skin + hair + a.data.color;
+    let url = this.faces.get(key);
+    if (url === undefined) { url = drawFace(robot, skin, hair, a.data.color); this.faces.set(key, url); }
+    return url;
   }
   private renderRoster() {
     const { title, tally, list } = this.ui;
@@ -1038,12 +1106,13 @@ export class OfficeScene3D {
     [...this.agents].sort((x, y) => x.deskIdx - y.deskIdx).forEach((a) => {
       const li = el("li"), b = el("button"); b.type = "button";
       if (a === this.selected) b.setAttribute("aria-current", "true");
-      const av = el("span", "o3d-avatar"); av.style.background = a.data.color;
+      const av = el("span", "o3d-avatar"), face = el("img"); face.src = this.faceIcon(a); face.alt = ""; face.draggable = false;
+      av.style.background = a.data.color; av.appendChild(face);
       const st = el("i"); st.style.background = STATUS[a.data.status].color; av.appendChild(st);
       const oc = a.data.id.startsWith("openclaw:");
       const fw = el("span", "o3d-fw " + (oc ? "badge-openclaw" : "badge-hermes"), oc ? "OC" : "H");
       fw.title = oc ? "OpenClaw agent" : "Hermes agent";
-      const nm = el("span", "o3d-name"); nm.append(el("span", "truncate", a.data.name), fw);
+      const nm = el("span", "o3d-name"); nm.append(fw, el("span", "truncate", a.data.name));
       const who = el("span", "o3d-who"); who.appendChild(nm);
       const sm = el("small", "", STATUS[a.data.status].label); sm.style.color = STATUS[a.data.status].color; who.appendChild(sm);
       b.append(av, who, el("span", "o3d-where", this.locText(a)));
@@ -1079,7 +1148,7 @@ export class OfficeScene3D {
   private wide() { return this.host.clientWidth > 780; }
   private viewFor(m: Mode) {
     const v = VIEWS[m], asp = this.camera.aspect || 1.6, f = Math.min(3.2, Math.max(1, 1.4 / asp));
-    const t = new THREE.Vector3(v.t[0] + (this.wide() ? 2.6 : 0), v.t[1] - (this.wide() ? 0 : (m === "all" ? 1.5 : 1.2) * f), v.t[2]);
+    const t = new THREE.Vector3(v.t[0] + (this.wide() && this.sidebarOpen ? 2.6 : 0), v.t[1] - (this.wide() ? 0 : (m === "all" ? 1.5 : 1.2) * f), v.t[2]);
     return { t, p: new THREE.Vector3(t.x + v.o[0] * f, t.y + v.o[1] * f, t.z + v.o[2] * f) };
   }
   private flyTo(t: THREE.Vector3, p: THREE.Vector3) {
