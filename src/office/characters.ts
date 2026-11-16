@@ -567,6 +567,7 @@ export class Robot extends BaseCharacter {
   }
 
   headY() { return 2.0; }
+  floor(): FloorId { return 0; } // the robot never leaves the Floor 0 bench (spec 11.d)
 
   setState(s: RobotState) { this.state = s; }
 

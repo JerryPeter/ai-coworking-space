@@ -11,13 +11,15 @@ import { officeBadge, toolBadge } from "../lib/derive";
 import { setParams, useRoute } from "../lib/router";
 import { relative, useNow } from "../lib/time";
 import { OfficeScene, webglAvailable, type Preset } from "../office/OfficeScene";
-import { hasSeat } from "../office/layout";
+import { hasSeat, loungeSpotFor } from "../office/layout";
 import type { RobotState } from "../office/characters";
 import { AGENTS, CLAUDE, CLAUDE_ID, identity, rosterIndex } from "../theme/agents";
 
 const LABEL: Record<OfficeState, string> = { working: "Working", reviewing: "Reviewing", idle: "Idle", offline: "Offline", unknown: "Unknown" };
 const robotState = (s: ToolState | undefined): RobotState => (s === "working" ? "running" : s === "idle" ? "not_running" : "unknown");
 const ROBOT_LABEL: Record<RobotState, string> = { running: "Running", not_running: "Not running", unknown: "Unknown" };
+const PRESET_LABEL: Record<Preset, string> = { overview: "Overview", workspace: "Floor 0 · Workspace", lounge: "Floor 1 · Lounge" };
+const ZONE_NAME = { tv: "TV corner", balcony: "Balcony", nap: "Rest room", commons: "Commons" } as const;
 
 export default function Office() {
   const office = useApi(endpoints.office, 5_000);
@@ -42,6 +44,7 @@ export default function Office() {
         robot: { id: CLAUDE_ID, hex: CLAUDE.hex, shortName: CLAUDE.shortName, index: rosterIndex(CLAUDE_ID) },
         onSelect: (id) => setParams({ agent: id, tab: null }),
         onFirstFrame: () => setReady(true),
+        onPresetChange: setPreset,
         reducedMotion,
       });
     } catch (e) {
@@ -69,6 +72,10 @@ export default function Office() {
     setParams({ focus: null }, true);
   }, [ready, focusParam]);
 
+  // Agents per floor by their target floor (idle → Floor 1 lounge, everything else → Floor 0 desk).
+  const seated = (data?.agents ?? []).filter((a) => hasSeat(a.name));
+  const onFloor = { workspace: seated.filter((a) => a.state !== "idle").length, lounge: seated.filter((a) => a.state === "idle").length };
+
   const legend = [
     ...[...(data?.agents ?? [])].sort((a, b) => rosterIndex(a.name) - rosterIndex(b.name)).map((a) => ({
       id: a.name, name: identity(a.name).displayName, seat: hasSeat(a.name),
@@ -88,14 +95,14 @@ export default function Office() {
               {[...(data?.agents ?? [])].sort((a, b) => rosterIndex(a.name) - rosterIndex(b.name)).map((a) => (
                 <tr key={a.name}>
                   <td>{identity(a.name).displayName}</td>
-                  <td>{a.state === "idle" ? "Lounge" : "Workspace"}</td>
+                  <td>{a.state === "idle" ? `Floor 1 · Lounge${hasSeat(a.name) ? ` (${ZONE_NAME[loungeSpotFor(a.name).zone]})` : ""}` : "Floor 0 · Workspace"}</td>
                   <td><StatusBadge status={officeBadge(a.state)} /></td>
                   <td className="xs secondary">{a.state_reason}</td>
                 </tr>
               ))}
               {data && (
                 <tr>
-                  <td>Claude Code CLI</td><td>Tool bench</td>
+                  <td>Claude Code CLI</td><td>Floor 0 · Tool bench</td>
                   <td><StatusBadge status={toolBadge(data.claude_tool?.state)} /></td>
                   <td className="xs secondary">{data.claude_tool?.detail ?? "Not Available"}</td>
                 </tr>
@@ -113,9 +120,13 @@ export default function Office() {
       <div className="office-frame">
         <div ref={host} className={`office-canvas${ready ? " ready" : ""}`} />
         <div className="ov ov-tl">
-          <div className="segmented" role="group" aria-label="Camera preset">
+          <div className="segmented" role="group" aria-label="Camera preset and floor">
             {(["overview", "workspace", "lounge"] as Preset[]).map((p) => (
-              <button key={p} aria-pressed={preset === p} onClick={() => { setPreset(p); scene.current?.preset(p); }}>{p[0].toUpperCase() + p.slice(1)}</button>
+              <button key={p} aria-pressed={preset === p} onClick={() => { setPreset(p); scene.current?.preset(p); }}
+                title={p === "overview" ? "Both floors" : p === "workspace" ? "Floor 0 only (Floor 1 hidden)" : "Floor 1 lounge"}>
+                {PRESET_LABEL[p]}
+                {p !== "overview" && data && <span className="floor-count" aria-label={`${onFloor[p]} agents on this floor`}>{onFloor[p]}</span>}
+              </button>
             ))}
           </div>
         </div>
@@ -132,7 +143,7 @@ export default function Office() {
           ))}
           {office.error && <div className="xs" style={{ color: "var(--outcome-failed)", padding: "4px 6px" }}>{office.error.message}</div>}
         </div>
-        <div className="ov ov-bl">Drag to orbit · Scroll to zoom · Click a character for details</div>
+        <div className="ov ov-bl">Drag to orbit · Scroll to zoom · Click a character for details · Use the floor buttons to switch floors</div>
         <div className="ov ov-br tabular">
           {office.updatedAt ? `State updated ${relative(office.updatedAt, now)} · every 5s` : "Loading state…"}
         </div>

@@ -5,7 +5,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { GeoCache, Human, Robot, type Character, type HumanState, type RobotState } from "./characters";
 import { buildFloor0, buildFloor1, type Floor0, type Floor1, type Glow } from "./room";
-import { hasSeat, PRESETS, type Preset } from "./layout";
+import { hasSeat, PRESETS, type FloorId, type Preset, type PresetDef } from "./layout";
 
 const DEG = Math.PI / 180;
 
@@ -17,8 +17,15 @@ export interface SceneOptions {
   robot: SceneCharacter;
   onSelect: (id: string) => void;
   onFirstFrame?: () => void;
+  /** Fired when the scene changes preset by itself (focus on an agent on a hidden floor). */
+  onPresetChange?: (p: Preset) => void;
   reducedMotion: boolean;
 }
+
+const TWEEN_MS = 1000;      // spec 7 / tech plan 5.2
+const FOCUS_DIST = 14;      // inside every floor preset's [minDist, maxDist]
+const TAG_FAR = 60;         // name tags hide beyond this camera distance (overview default is ~54)
+const ZONE_LABEL_FAR = 45;  // spec 7: zone labels only when closer than 45
 
 const STATUS_HEX = { working: "#22C55E", reviewing: "#F5B83D" };
 const OFF = new THREE.Color(0, 0, 0);
@@ -27,6 +34,22 @@ const BENCH_STRIP = new THREE.Color("#F97316");
 
 const TV_STANDBY = new THREE.Color("#1E293B");
 const TV_CYCLE = ["#5B7CFA", "#2DD4BF", "#A78BFA"].map((h) => new THREE.Color(h));
+
+/** Union of two presets' orbit limits (used while tweening between them). */
+function union(a: PresetDef, b: PresetDef): PresetDef {
+  return {
+    ...b,
+    minDist: Math.min(a.minDist, b.minDist), maxDist: Math.max(a.maxDist, b.maxDist),
+    minPolar: Math.min(a.minPolar, b.minPolar), maxPolar: Math.max(a.maxPolar, b.maxPolar),
+    minAzimuth: Math.min(a.minAzimuth, b.minAzimuth), maxAzimuth: Math.max(a.maxAzimuth, b.maxAzimuth),
+  };
+}
+
+/** Visible including every ancestor (Raycaster ignores `visible`). */
+function shown(o: THREE.Object3D | null): boolean {
+  for (; o; o = o.parent) if (!o.visible) return false;
+  return true;
+}
 
 function easeInOutCubic(p: number) { return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
 
@@ -61,7 +84,10 @@ export class OfficeScene {
   private mouseDirty = false;
   private hovered: Character | null = null;
   private down: { x: number; y: number } | null = null;
-  private tween: { fromP: THREE.Vector3; toP: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; t0: number } | null = null;
+  private tween: { fromP: THREE.Vector3; toP: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; t0: number; onHalf?: () => void; onDone?: () => void } | null = null;
+  private current: Preset = "overview";
+  private floorsVisible: [boolean, boolean] = [true, true];
+  private occluders: THREE.Mesh[] = [];
   private ro: ResizeObserver;
   private firstFrame = false;
   private states = new Map<string, string>();
@@ -91,16 +117,13 @@ export class OfficeScene {
     sun.castShadow = false;
     this.scene.add(sun, sun.target);
 
-    // Camera + orbit controls
+    // Camera + orbit controls (pan stays off; limits come from the active preset)
     const p = PRESETS.overview;
     this.camera.position.set(...p.pos);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.target.set(...p.target);
-    Object.assign(this.controls, {
-      enableDamping: true, dampingFactor: 0.08, enablePan: false,
-      minPolarAngle: 10 * DEG, maxPolarAngle: 80 * DEG, minDistance: 8, maxDistance: 75,
-      rotateSpeed: 0.6, zoomSpeed: 0.8,
-    });
+    Object.assign(this.controls, { enableDamping: true, dampingFactor: 0.08, enablePan: false, rotateSpeed: 0.6, zoomSpeed: 0.8 });
+    this.applyLimits(p);
     this.controls.update();
 
     // Two floors (Floor 1 group sits at y = FLOOR_H). No grid helper in the new scene.
@@ -108,6 +131,7 @@ export class OfficeScene {
     this.floor0 = buildFloor0(this.agentHex);
     this.floor1 = buildFloor1();
     this.scene.add(this.floor0.group, this.floor1.group);
+    this.occluders = [this.floor0.staticMesh, this.floor1.staticMesh];
 
     // Characters live in ONE world-space group and change floor by world Y (tech plan 3.3), so a
     // walker can cross floors on the stair without re-parenting. Floor-1 spots are authored in
@@ -171,30 +195,77 @@ export class OfficeScene {
     if (d.laptopScreen) this.deskTargets.set(d.laptopScreen, state === "working" ? new THREE.Color("#84CC16").multiplyScalar(0.35) : new THREE.Color(0, 0, 0));
   }
 
-  // ---------------- camera ----------------
+  // ---------------- camera + floors ----------------
+  get activePreset() { return this.current; }
+
   preset(name: Preset) {
     const p = PRESETS[name];
-    this.tweenTo(new THREE.Vector3(...p.pos), new THREE.Vector3(...p.target));
+    this.go(name, new THREE.Vector3(...p.pos), new THREE.Vector3(...p.target));
   }
 
+  /** Tween to a character's head. If it is on a hidden floor, switch to that floor's preset first. */
   focus(id: string) {
     const c = this.chars.get(id);
     if (!c) return;
+    // Floor 1 → Lounge preset; Floor 0 → Workspace (Lounge hides floor-0 tags, Overview's min distance is 25).
+    const name: Preset = c.floor() === 1 ? "lounge" : "workspace";
     const target = c.headWorld(new THREE.Vector3());
-    const offset = this.camera.position.clone().sub(this.controls.target).normalize().multiplyScalar(10);
-    this.tweenTo(target.clone().add(offset), target);
+    // Keep the current orbit direction, clamped into the destination preset's polar/azimuth limits.
+    const p = PRESETS[name];
+    const sph = new THREE.Spherical().setFromVector3(this.camera.position.clone().sub(this.controls.target));
+    sph.phi = THREE.MathUtils.clamp(sph.phi, p.minPolar * DEG, p.maxPolar * DEG);
+    sph.theta = THREE.MathUtils.clamp(sph.theta, p.minAzimuth * DEG, p.maxAzimuth * DEG);
+    sph.radius = FOCUS_DIST;
+    this.go(name, target.clone().add(new THREE.Vector3().setFromSpherical(sph)), target);
   }
 
-  private tweenTo(pos: THREE.Vector3, target: THREE.Vector3) {
+  /** Preset switch: floors that appear show at once, floors that disappear hide at the tween midpoint;
+   *  orbit limits are widened to the union during the tween and narrowed at the end (tech plan 5.2). */
+  private go(name: Preset, pos: THREE.Vector3, target: THREE.Vector3) {
+    const from = PRESETS[this.current], to = PRESETS[name];
+    const changed = name !== this.current;
+    this.current = name;
+    if (changed) this.opts.onPresetChange?.(name);
+    const floors = to.floors;
+    const showNow: [boolean, boolean] = [this.floorsVisible[0] || floors[0], this.floorsVisible[1] || floors[1]];
+    this.setFloors(showNow);
+    this.onPresetLights?.(name);
     if (this.opts.reducedMotion) {
       this.camera.position.copy(pos);
       this.controls.target.copy(target);
+      this.setFloors(floors);
+      this.applyLimits(to);
       this.controls.update();
       return;
     }
-    this.tween = { fromP: this.camera.position.clone(), toP: pos, fromT: this.controls.target.clone(), toT: target, t0: performance.now() };
+    this.applyLimits(union(from, to));
+    this.tween = {
+      fromP: this.camera.position.clone(), toP: pos, fromT: this.controls.target.clone(), toT: target, t0: performance.now(),
+      onHalf: () => this.setFloors(floors),
+      onDone: () => this.applyLimits(to),
+    };
     this.controls.enabled = false; // input disabled during the tween
   }
+
+  private applyLimits(p: PresetDef) {
+    Object.assign(this.controls, {
+      minDistance: p.minDist, maxDistance: p.maxDist,
+      minPolarAngle: p.minPolar * DEG, maxPolarAngle: p.maxPolar * DEG,
+      minAzimuthAngle: p.minAzimuth * DEG, maxAzimuthAngle: p.maxAzimuth * DEG,
+    });
+  }
+
+  private setFloors(v: [boolean, boolean]) {
+    this.floorsVisible = [v[0], v[1]];
+    this.floor0.group.visible = v[0];
+    this.floor1.group.visible = v[1];
+  }
+
+  /** Floors currently shown (for tests / UI). */
+  get visibleFloors(): [boolean, boolean] { return [...this.floorsVisible] as [boolean, boolean]; }
+
+  /** Hook for the light-state tween (task 7). */
+  private onPresetLights?: (p: Preset) => void;
 
   // ---------------- lifecycle ----------------
   setActive(a: boolean) {
@@ -228,11 +299,13 @@ export class OfficeScene {
 
   private frame(dt: number) {
     if (this.tween) {
-      const p = Math.min(1, (performance.now() - this.tween.t0) / 600);
+      const tw = this.tween;
+      const p = Math.min(1, (performance.now() - tw.t0) / TWEEN_MS);
       const e = easeInOutCubic(p);
-      this.camera.position.lerpVectors(this.tween.fromP, this.tween.toP, e);
-      this.controls.target.lerpVectors(this.tween.fromT, this.tween.toT, e);
-      if (p >= 1) { this.tween = null; this.controls.enabled = true; }
+      this.camera.position.lerpVectors(tw.fromP, tw.toP, e);
+      this.controls.target.lerpVectors(tw.fromT, tw.toT, e);
+      if (p >= 0.5 && tw.onHalf) { tw.onHalf(); tw.onHalf = undefined; }
+      if (p >= 1) { this.tween = null; this.controls.enabled = true; tw.onDone?.(); }
     }
     this.controls.update();
 
@@ -268,9 +341,17 @@ export class OfficeScene {
     }
     this.floor1.tv.mat.emissive.lerp(this.tvTarget, this.opts.reducedMotion ? 1 : a);
 
-    // Name tags hide when zoomed far out, except the hovered one.
-    const far = this.camera.position.distanceTo(this.controls.target) > 24;
-    this.chars.forEach((c) => c.tagEl.classList.toggle("hidden", far && c !== this.hovered));
+    // Characters follow their floor's visibility (walkers change floor on the stair at y = 3).
+    this.chars.forEach((c) => { c.root.visible = this.floorsVisible[c.floor()]; });
+    // Name tags: hide when far (except hovered). CSS2D draws through geometry, so in the Lounge preset
+    // floor-0 tags/labels are hidden; zone labels only show for the matching floor preset and < 45 u.
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    const overlayFloor = (f: FloorId) => this.current === "overview" || (this.current === "lounge" ? f === 1 : f === 0);
+    this.chars.forEach((c) => c.tagEl.classList.toggle("hidden", (dist > TAG_FAR || !overlayFloor(c.floor())) && c !== this.hovered));
+    const zoneOk = (f: FloorId) => this.current !== "overview" && overlayFloor(f) && dist < ZONE_LABEL_FAR;
+    this.floor0.labels.forEach((l) => l.element.classList.toggle("hidden", !(l.element.classList.contains("sign") ? overlayFloor(0) : zoneOk(0))));
+    this.floor1.labels.forEach((l) => l.element.classList.toggle("hidden", !(l.element.classList.contains("sign") ? overlayFloor(1) : zoneOk(1))));
+    Object.values(this.floor0.deskLabels).forEach((l) => l.element.classList.toggle("hidden", !overlayFloor(0) || dist > TAG_FAR));
 
     this.renderer.render(this.scene, this.camera);
     this.labels.render(this.scene, this.camera);
@@ -295,10 +376,14 @@ export class OfficeScene {
   };
   private onLeave = () => { this.setHovered(null); };
 
+  /** First VISIBLE hit among characters and the floors' static meshes (occluders). A click only selects a
+   *  character if it is the first visible thing under the cursor (no picking through the Floor 1 slab). */
   private hit(): Character | null {
     this.ray.setFromCamera(this.mouse, this.camera);
-    const h = this.ray.intersectObjects(this.pickables, false)[0];
-    return h ? this.chars.get(h.object.userData.charId) ?? null : null;
+    const hits = this.ray.intersectObjects([...this.pickables, ...this.occluders], false);
+    const h = hits.find((x) => shown(x.object));
+    const id = h?.object.userData.charId as string | undefined;
+    return id ? this.chars.get(id) ?? null : null;
   }
   private pick() { this.setHovered(this.hit()); }
   private setHovered(c: Character | null) {
