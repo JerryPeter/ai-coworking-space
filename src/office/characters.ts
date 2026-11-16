@@ -2,6 +2,7 @@
 // textures. Each character is a root Group with pivot groups; animation only moves pivots.
 import * as THREE from "three";
 import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { deskToLounge, DESKS, floorOfY, floorY, loungeSpotFor, ROBOT_POS, type FloorId, type LoungeSpot, type Spot } from "./layout";
 
 const DEG = Math.PI / 180;
@@ -12,11 +13,17 @@ export type RobotState = "running" | "not_running" | "unknown";
 
 // ---------- shared geometry cache (one geometry instance per unique size) ----------
 export class GeoCache {
-  private map = new Map<string, THREE.BoxGeometry>();
+  private map = new Map<string, THREE.BufferGeometry>();
   get(w: number, h: number, d: number) {
     const k = `${w},${h},${d}`;
     let g = this.map.get(k);
     if (!g) { g = new THREE.BoxGeometry(w, h, d); this.map.set(k, g); }
+    return g;
+  }
+  /** Any other shared geometry, built once per key. */
+  named(key: string, make: () => THREE.BufferGeometry) {
+    let g = this.map.get(key);
+    if (!g) { g = make(); this.map.set(key, g); }
     return g;
   }
   dispose() { this.map.forEach((g) => g.dispose()); this.map.clear(); }
@@ -49,15 +56,20 @@ const Q_BITMAP = [".###.", "#...#", "....#", "...#.", "..#..", ".....", "..#.."]
 function questionBox(geo: GeoCache, mk: (hex: string, role?: Role, e?: string, ei?: number) => THREE.MeshLambertMaterial) {
   const g = new THREE.Group();
   g.add(new THREE.Mesh(geo.get(0.6, 0.6, 0.6), mk("#6B7280")));
-  const glyphMat = mk("#E8EAF0", "normal", "#E8EAF0", 0.3);
-  for (const side of [1, -1]) {
-    Q_BITMAP.forEach((row, r) => [...row].forEach((ch, c) => {
-      if (ch !== "#") return;
-      const m = new THREE.Mesh(geo.get(0.08, 0.08, 0.02), glyphMat);
-      m.position.set((c - 2) * 0.09 * side, (3 - r) * 0.09, side * 0.31);
-      g.add(m);
-    }));
-  }
+  // The "?" glyph pixels (both faces, 18 boxes) are merged into ONE cached geometry (tech plan 6.2):
+  // 2 draw calls per box instead of 19.
+  const glyph = geo.named("qglyph", () => {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const side of [1, -1]) {
+      Q_BITMAP.forEach((row, r) => [...row].forEach((ch, c) => {
+        if (ch === "#") parts.push(new THREE.BoxGeometry(0.08, 0.08, 0.02).translate((c - 2) * 0.09 * side, (3 - r) * 0.09, side * 0.31));
+      }));
+    }
+    const merged = mergeGeometries(parts, false)!;
+    parts.forEach((p) => p.dispose());
+    return merged;
+  });
+  g.add(new THREE.Mesh(glyph, mk("#E8EAF0", "normal", "#E8EAF0", 0.3)));
   g.scale.setScalar(0.001);
   g.visible = false;
   return g;

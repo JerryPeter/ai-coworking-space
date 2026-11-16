@@ -173,7 +173,15 @@ export class OfficeScene {
     this.ro.observe(container);
     this.resize();
     document.addEventListener("visibilitychange", this.onVisibility);
+    // Dev-only perf probe (tech plan 6.2): window.__office.stats() in the browser console.
+    if (import.meta.env.DEV) (window as unknown as { __office?: OfficeScene }).__office = this;
     this.loop();
+  }
+
+  /** Draw calls / triangles of the last frame + GPU memory counts (dev diagnostics). */
+  stats() {
+    const { render, memory } = this.renderer.info;
+    return { calls: render.calls, triangles: render.triangles, geometries: memory.geometries, textures: memory.textures, preset: this.current, floors: this.visibleFloors };
   }
 
   // ---------------- data ----------------
@@ -455,6 +463,7 @@ export class OfficeScene {
         (Array.isArray(mat) ? mat : [mat]).forEach((x) => x?.dispose());
       }
     });
+    if (import.meta.env.DEV && (window as unknown as { __office?: OfficeScene }).__office === this) delete (window as unknown as { __office?: OfficeScene }).__office;
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     el.remove();
