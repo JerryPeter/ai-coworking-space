@@ -5,7 +5,7 @@
 import * as THREE from "three";
 import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { BENCH, DESKS, FLOOR_H, ZONE_LABELS } from "./layout";
+import { BENCH, DESKS, FLOOR_H, STAIR, ZONE_LABELS } from "./layout";
 
 const DEG = Math.PI / 180;
 type V3 = [number, number, number];
@@ -189,6 +189,27 @@ function railing(batch: StaticBatch, axis: "x" | "z", fixed: number, from: numbe
 }
 
 // =====================================================================================
+// Staircase (spec 6.1 / 9.8). World coordinates, y 0 → 6. Lives in the Floor 0 batch so it stays
+// visible in the Workspace cutaway (Floor 1 hidden).
+// =====================================================================================
+export function buildStairs(b: StaticBatch) {
+  const { x, steps, rise, tread, width, frontZ } = STAIR;
+  const slope = Math.atan((steps * rise) / (steps * tread)); // 35.54°
+  const run = Math.hypot(steps * rise, steps * tread);         // 10.32
+  const midZ = frontZ - (steps * tread) / 2;                    // 8.2
+  for (let i = 0; i < steps; i++) {
+    const top = rise * (i + 1);
+    const zc = frontZ - tread * i - tread / 2;
+    b.box(width, top, tread, x, top / 2, zc, i % 2 ? "#343C4D" : "#3A4356");          // solid stacked block
+    b.box(width, 0.04, 0.08, x, top + 0.01, frontZ - tread * i - 0.04, "#4A5A8A");   // nosing strip
+  }
+  b.box(0.12, 0.6, run, -17.1, 3.0, midZ, "#2E3444", [slope, 0, 0]);                 // open-side stringer
+  for (const i of [1, 4, 7, 10, 11]) b.box(0.1, 2.0, 0.1, -17.25, rise * (i + 1) + 1.0, frontZ - tread * i - tread / 2, "#4A5266");
+  b.box(0.1, 0.1, run, -17.25, 5.0, midZ, "#4A5266", [slope, 0, 0]);                  // sloped handrail
+  b.box(width, 0.02, 1.4, x, 0.01, 13.2, "#2E3444");                                   // bottom landing pad
+}
+
+// =====================================================================================
 // Floor 0 · Workspace (spec 2)
 // =====================================================================================
 export interface FloorBuild { group: THREE.Group; staticMesh: THREE.Mesh; dynamic: THREE.Group; labels: CSS2DObject[] }
@@ -300,6 +321,7 @@ export function buildFloor0(agentHex: Record<string, string>): Floor0 {
   b.box(0.6, 0.7, 0.6, -10, 1.95, 12, "#7DD3FC");
   plant(b, -9.5, 1.5, 1.0);
   plant(b, -12.0, 13.2, 0.8);
+  buildStairs(b);
 
   const group = new THREE.Group();
   group.name = "floor-0";
