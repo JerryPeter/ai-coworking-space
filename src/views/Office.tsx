@@ -1,6 +1,7 @@
 // 3D Office (spec 6.7 + 7). Lazy-loaded so only this view pays for Three.js.
 // Polls /api/office/state every 5 s. Characters only show "working" when the API says so
 // (a real kanban claim); today everyone is idle, which is correct.
+import { Moon, Sun } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { endpoints, useApi } from "../api/client";
 import type { OfficeState, ToolState } from "../api/types";
@@ -13,6 +14,7 @@ import { relative, useNow } from "../lib/time";
 import { OfficeScene, webglAvailable, type Preset } from "../office/OfficeScene";
 import { hasSeat, loungeSpotFor } from "../office/layout";
 import type { RobotState } from "../office/characters";
+import { readTod, store, TOD_KEY, type TimeOfDay } from "../office/palettes";
 import { AGENTS, CLAUDE, CLAUDE_ID, identity, rosterIndex } from "../theme/agents";
 
 const LABEL: Record<OfficeState, string> = { working: "Working", reviewing: "Reviewing", idle: "Idle", offline: "Offline", unknown: "Unknown" };
@@ -31,6 +33,9 @@ export default function Office() {
   const [gl] = useState(webglAvailable);
   const [preset, setPreset] = useState<Preset>("overview");
   const [initError, setInitError] = useState<string | null>(null);
+  const [tod, setTod] = useState<TimeOfDay>(readTod);
+  const todRef = useRef(tod);
+  todRef.current = tod;
   const focusParam = params.get("focus");
 
   // Mount / unmount the Three.js scene with the view (render loop stops on unmount).
@@ -52,8 +57,16 @@ export default function Office() {
       return;
     }
     scene.current = s;
+    s.setTimeOfDay(todRef.current, { instant: true }); // persisted choice, no tween on first paint
     return () => { s.dispose(); scene.current = null; };
   }, [gl]);
+
+  const toggleTod = () => {
+    const next: TimeOfDay = tod === "day" ? "night" : "day";
+    setTod(next);
+    store(TOD_KEY, next);
+    scene.current?.setTimeOfDay(next);
+  };
 
   // Push API state into the scene.
   const data = office.data;
@@ -120,6 +133,13 @@ export default function Office() {
       <div className="office-frame">
         <div ref={host} className={`office-canvas${ready ? " ready" : ""}`} />
         <div className="ov ov-tl">
+          <div className="segmented" role="radiogroup" aria-label="Time of day">
+            <button className="icon tod-day" role="radio" aria-checked={tod === "day"} aria-pressed={tod === "day"} aria-label="Day" title="Day mode"
+              onClick={() => tod !== "day" && toggleTod()}><Sun size={16} /></button>
+            <button className="icon tod-night" role="radio" aria-checked={tod === "night"} aria-pressed={tod === "night"} aria-label="Night" title="Night mode"
+              onClick={() => tod !== "night" && toggleTod()}><Moon size={16} /></button>
+          </div>
+          <span className="ov-sep" aria-hidden="true" />
           <div className="segmented" role="group" aria-label="Camera preset and floor">
             {(["overview", "workspace", "lounge"] as Preset[]).map((p) => (
               <button key={p} aria-pressed={preset === p} onClick={() => { setPreset(p); scene.current?.preset(p); }}

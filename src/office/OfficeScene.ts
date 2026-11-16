@@ -5,7 +5,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { GeoCache, Human, Robot, type Character, type HumanState, type RobotState } from "./characters";
 import { buildFloor0, buildFloor1, type Floor0, type Floor1, type Glow } from "./room";
-import { BALCONY_LIGHT, hasSeat, LIGHT_STATES, PRESETS, SUN_POS, SUN_TARGET, type FloorId, type LightState, type Preset, type PresetDef } from "./layout";
+import { BALCONY_LIGHT, hasSeat, PRESETS, SUN_TARGET, type FloorId, type Preset, type PresetDef } from "./layout";
+import { voxelLights, type TimeOfDay, type VoxelLightState } from "./palettes";
 
 const DEG = Math.PI / 180;
 
@@ -35,7 +36,7 @@ const BENCH_STRIP = new THREE.Color("#F97316");
 const TV_STANDBY = new THREE.Color("#1E293B");
 const TV_CYCLE = ["#5B7CFA", "#2DD4BF", "#A78BFA"].map((h) => new THREE.Color(h));
 
-interface LightNow { ambient: THREE.Color; ambientI: number; sun: THREE.Color; sunI: number; balconyI: number }
+interface LightNow { ambient: THREE.Color; ambientI: number; sun: THREE.Color; sunI: number; sunPos: THREE.Vector3; balcony: THREE.Color; balconyI: number; bg: THREE.Color }
 
 /** Union of two presets' orbit limits (used while tweening between them). */
 function union(a: PresetDef, b: PresetDef): PresetDef {
@@ -101,6 +102,8 @@ export class OfficeScene {
   private ledOn = [false, false];
   private opts: SceneOptions;
   private agentHex: Record<string, string> = {};
+  /** Day/night base light state; presets apply a small modifier on top (pixel-office spec 3.1). */
+  timeOfDay: TimeOfDay = "day";
 
   constructor(private container: HTMLElement, opts: SceneOptions) {
     this.opts = opts;
@@ -115,21 +118,22 @@ export class OfficeScene {
     container.appendChild(this.labels.domElement);
 
     // The scene stays dark in both UI themes.
-    this.scene.background = new THREE.Color("#0B0D12");
+    const L = voxelLights(this.timeOfDay, "overview");
+    this.scene.background = new THREE.Color(L.background);
     // Lights (max 3, no shadows): ambient + sun follow the preset's mood (spec 8.1); a warm point light
     // over the balcony stands in for the outdoor sky glow. All three tween with the camera.
-    const L = LIGHT_STATES.overview;
     this.ambient = new THREE.AmbientLight(L.ambient, L.ambientI);
     this.sun = new THREE.DirectionalLight(L.sun, L.sunI);
-    this.sun.position.set(...SUN_POS);
+    this.sun.position.set(...L.sunPos);
     this.sun.target.position.set(...SUN_TARGET);
     this.sun.castShadow = false;
-    this.balcony = new THREE.PointLight(BALCONY_LIGHT.color, L.balconyI, BALCONY_LIGHT.distance, 0); // decay 0: smooth fade to 0 at 18 u
+    this.balcony = new THREE.PointLight(L.balcony, L.balconyI, BALCONY_LIGHT.distance, 0); // decay 0: smooth fade to 0 at 18 u
     this.balcony.position.set(...BALCONY_LIGHT.pos);
     this.balcony.castShadow = false;
     this.ambient.name = "ambient"; this.sun.name = "sun"; this.balcony.name = "balcony-light";
     this.scene.add(this.ambient, this.sun, this.sun.target, this.balcony);
-    this.onPresetLights = (name) => this.tweenLights(LIGHT_STATES[name]);
+    // Light target = f(timeOfDay, preset): a preset click keeps the current time of day.
+    this.onPresetLights = (name) => this.tweenLights(voxelLights(this.timeOfDay, name));
 
     // Camera + orbit controls (pan stays off; limits come from the active preset)
     const p = PRESETS.overview;
@@ -181,7 +185,7 @@ export class OfficeScene {
   /** Draw calls / triangles of the last frame + GPU memory counts (dev diagnostics). */
   stats() {
     const { render, memory } = this.renderer.info;
-    return { calls: render.calls, triangles: render.triangles, geometries: memory.geometries, textures: memory.textures, preset: this.current, floors: this.visibleFloors };
+    return { calls: render.calls, triangles: render.triangles, geometries: memory.geometries, textures: memory.textures, preset: this.current, floors: this.visibleFloors, tod: this.timeOfDay };
   }
 
   // ---------------- data ----------------
@@ -290,12 +294,23 @@ export class OfficeScene {
   private onPresetLights?: (p: Preset) => void;
 
   private lightNow(): LightNow {
-    return { ambient: this.ambient.color.clone(), ambientI: this.ambient.intensity, sun: this.sun.color.clone(), sunI: this.sun.intensity, balconyI: this.balcony.intensity };
+    return {
+      ambient: this.ambient.color.clone(), ambientI: this.ambient.intensity, sun: this.sun.color.clone(), sunI: this.sun.intensity,
+      sunPos: this.sun.position.clone(), balcony: this.balcony.color.clone(), balconyI: this.balcony.intensity,
+      bg: (this.scene.background as THREE.Color).clone(),
+    };
   }
 
-  private tweenLights(to: LightState) {
-    const target: LightNow = { ambient: new THREE.Color(to.ambient), ambientI: to.ambientI, sun: new THREE.Color(to.sun), sunI: to.sunI, balconyI: to.balconyI };
-    if (this.opts.reducedMotion) { this.applyLight(target, target, 1); return; }
+  private toLightNow(to: VoxelLightState): LightNow {
+    return {
+      ambient: new THREE.Color(to.ambient), ambientI: to.ambientI, sun: new THREE.Color(to.sun), sunI: to.sunI,
+      sunPos: new THREE.Vector3(...to.sunPos), balcony: new THREE.Color(to.balcony), balconyI: to.balconyI, bg: new THREE.Color(to.background),
+    };
+  }
+
+  private tweenLights(to: VoxelLightState, instant = false) {
+    const target = this.toLightNow(to);
+    if (instant || this.opts.reducedMotion) { this.lightTween = null; this.applyLight(target, target, 1); return; }
     this.lightTween = { from: this.lightNow(), to: target, t0: performance.now() };
   }
 
@@ -304,7 +319,17 @@ export class OfficeScene {
     this.ambient.intensity = a.ambientI + (b.ambientI - a.ambientI) * e;
     this.sun.color.lerpColors(a.sun, b.sun, e);
     this.sun.intensity = a.sunI + (b.sunI - a.sunI) * e;
+    this.sun.position.lerpVectors(a.sunPos, b.sunPos, e);
+    this.balcony.color.lerpColors(a.balcony, b.balcony, e);
     this.balcony.intensity = a.balconyI + (b.balconyI - a.balconyI) * e;
+    (this.scene.background as THREE.Color).lerpColors(a.bg, b.bg, e);
+  }
+
+  /** Day/night (pixel-office spec 3.1): 1 s easeInOutCubic tween, composed with the active preset's modifier. */
+  setTimeOfDay(tod: TimeOfDay, opts: { instant?: boolean } = {}) {
+    if (tod === this.timeOfDay && !opts.instant) return;
+    this.timeOfDay = tod;
+    this.tweenLights(voxelLights(tod, this.current), opts.instant);
   }
 
   // ---------------- lifecycle ----------------
