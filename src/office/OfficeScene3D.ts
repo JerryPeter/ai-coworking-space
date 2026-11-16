@@ -89,18 +89,164 @@ interface Agent3D {
   /** Claude Code CLI is a tool, not a person: rendered as a floating energy orb instead of a body. */
   orb?: Orb;
 }
+/** One orbiting ember (units: orb radii, like the reference's R-relative maths). */
+interface Ember { a: number; rad: number; spd: number; dy: number; vy: number; size: number; max: number; life: number; fl: number }
+/** One smoke tendril: an arc of soft blobs on the tilted orbit plane. */
+interface Tendril { a0: number; span: number; r0: number; shrink: number; speed: number; width: number; phase: number; wob: number; alpha: number }
+/** A particle layer: one buffer drawn twice (behind the orb, then in front of it). */
+interface OrbLayer { geo: THREE.BufferGeometry; pos: Float32Array; col: Float32Array; size: Float32Array; back: THREE.Points; front: THREE.Points }
 interface Orb {
-  state: ToolStatus; float: THREE.Group; core: THREE.Mesh; coreMat: THREE.MeshBasicMaterial; innerMat: THREE.MeshBasicMaterial;
-  halo: THREE.Mesh; haloMat: THREE.MeshBasicMaterial; sparks: THREE.Mesh[]; sparkMat: THREE.MeshBasicMaterial; light: THREE.PointLight; tagClock: number;
+  state: ToolStatus; float: THREE.Group; plane: THREE.Mesh; mat: THREE.ShaderMaterial; fallback: THREE.MeshBasicMaterial | null;
+  glow: THREE.Sprite; fx: THREE.Group; embers: Ember[]; tendrils: Tendril[]; emberLayer: OrbLayer; smokeLayer: OrbLayer;
+  fxMats: THREE.ShaderMaterial[]; textures: THREE.Texture[]; light: THREE.PointLight;
+  pulse: number; spin: number; time: number; tagClock: number;
 }
-/** Energy-orb look per Claude CLI tool state. Light intensities are legacy units (x PI, like the other lights). */
-const ORB_LOOK: Record<ToolStatus, { core: number; inner: number; innerOp: number; halo: number; haloOp: number; light: number }> = {
-  working: { core: 0xf97316, inner: 0xffb347, innerOp: 0.35, halo: 0xffe2bf, haloOp: 0.13, light: 1.2 },
-  idle: { core: 0x8b6914, inner: 0xb08a3a, innerOp: 0.14, halo: 0xd9c49a, haloOp: 0.05, light: 0.1 },
-  unknown: { core: 0x5a5a5a, inner: 0x7a7a7a, innerOp: 0.1, halo: 0x9a9a9a, haloOp: 0.04, light: 0 },
-};
-const ORB_Y = 1.2;
-const ORB_SPARKS = 10;
+/** Claude CLI orb: floats in the Lantai 1 lobby, between the meeting room's glass wall (x=-5) and the stairs (x~0..4). */
+const ORB_POS = { x: -2.4, z: 3.9 };
+const ORB_Y = 1.6;   // centre height (about a character's shoulder)
+const ORB_R = 0.5;   // glass sphere radius (1u across, roughly one character)
+const ORB_EMBERS = 80, ORB_TENDRILS = 16, ORB_SEG = 14;
+const TAU = Math.PI * 2;
+
+/* Clay/glass orb shaders, ported from the reference orb.html (WebGL1 full-screen quad -> Three.js billboard).
+   Changes vs. the reference FS: uv comes from vUv (-1..1 across the plane) instead of gl_FragCoord/uRes, uRes is
+   gone, and the 2-pixel edge AA uses fwidth(r) instead of 2.0/px. Everything else is verbatim. gl_FragColor /
+   texture2D keep working: ShaderMaterial (glslVersion unset) maps them onto GLSL ES 3.00 for WebGL2. */
+const ORB_VS = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+const ORB_FS = /* glsl */ `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform float uTime;
+uniform float uPulse;
+varying vec2 vUv;
+
+float hash(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  float a = hash(i), b = hash(i+vec2(1.0,0.0)), c = hash(i+vec2(0.0,1.0)), d = hash(i+vec2(1.0,1.0));
+  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+}
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+  for(int i=0;i<5;i++){ v += a*noise(p); p = m*p; a *= 0.5; }
+  return v;
+}
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+
+void main(){
+  vec2 uv = vUv * 2.0 - 1.0;
+  float r = length(uv);
+  float aa = 2.0*fwidth(r); // derivative taken before the early return (needs uniform control flow)
+  if (r > 1.0) { gl_FragColor = vec4(0.0); return; }
+  float t = uTime;
+  float z = sqrt(max(0.0, 1.0 - r*r));
+  vec3 n = vec3(uv, z);
+
+  vec2 p = uv/(0.5 + z*0.5);
+  p = rot(t*0.07)*p*1.55;
+  float sw = 1.3/(1.0 + dot(p,p)*0.55);
+  p = rot(sw*(0.9*sin(t*0.27) + t*0.18))*p;
+
+  vec2 q  = vec2(fbm(p + vec2(0.0, t*0.12)), fbm(p + vec2(5.2,1.3) - t*0.10));
+  vec2 rr = vec2(fbm(p + 3.0*q + vec2(1.7,9.2) + t*0.15), fbm(p + 3.0*q + vec2(8.3,2.8) - t*0.13));
+  float f = fbm(p + 3.5*rr);
+
+  vec3 deep = vec3(0.10, 0.035, 0.02);
+  vec3 mid  = vec3(0.70, 0.31, 0.19);
+  vec3 hot  = vec3(1.0, 0.74, 0.56);
+  vec3 col = mix(deep, mid, smoothstep(0.22, 0.72, f));
+  col = mix(col, hot, smoothstep(0.62, 0.95, f)*0.65);
+
+  float veins = pow(1.0 - abs(sin(f*13.0 + rr.x*6.0)), 7.0);
+  col += veins*vec3(0.98, 0.58, 0.40)*0.38*smoothstep(0.3, 0.75, length(q));
+
+  float dark = smoothstep(0.46, 0.72, fbm(p*1.25 - rr*2.0 + t*0.05));
+  col *= mix(1.0, 0.32, dark);
+
+  float sr = length(uv);
+  float sa = atan(uv.y, uv.x);
+  float sn = fbm(vec2(sa*1.2, sr*6.0 - t*0.6));
+  float phase = 2.0*sa - 15.0*sr + t*1.1 + (sn - 0.5)*0.9;
+  float arm = smoothstep(0.72, 1.0, sin(phase));
+  float smask = smoothstep(0.44, 0.26, sr)*smoothstep(0.02, 0.07, sr);
+  float core = exp(-sr*sr*260.0);
+  float flick = 0.62 + 0.18*sin(t*2.1) + 0.1*sin(t*5.3 + 1.7) + uPulse*0.6;
+  float sigil = arm*smask*(1.0 - sr*1.4);
+  vec3 sigCol = mix(vec3(0.96, 0.52, 0.34), vec3(1.0, 0.9, 0.78), core + arm*0.25*smask);
+  col = mix(col, sigCol, clamp(sigil*1.3 + core, 0.0, 1.0)*clamp(flick, 0.0, 1.0));
+  float halo = exp(-sr*3.4);
+  col += vec3(0.85, 0.42, 0.26)*halo*0.32*flick;
+
+  vec3 L = normalize(vec3(0.45, 0.6, 0.7));
+  col *= 0.55 + 0.5*max(dot(n, L), 0.0);
+  float fres = pow(1.0 - z, 2.4);
+  col *= mix(1.0, 0.6, smoothstep(0.55, 1.0, r));
+  col += vec3(0.85, 0.42, 0.29)*fres*0.95;
+  col += vec3(0.60, 0.25, 0.15)*smoothstep(0.2, 1.0, -uv.y)*fres*0.7;
+
+  vec3 Hv = normalize(L + vec3(0.0, 0.0, 1.0));
+  float spec = pow(max(dot(n, Hv), 0.0), 70.0);
+  col += vec3(1.0, 0.94, 0.88)*spec*0.85;
+  float gloss = smoothstep(0.38, 0.0, length((uv - vec2(0.22, 0.58))*vec2(1.0, 2.1)));
+  col += vec3(1.0, 0.80, 0.68)*gloss*0.16;
+  float crescent = smoothstep(0.035, 0.0, abs(r - 0.93))*smoothstep(0.1, 0.7, uv.y + uv.x*0.3);
+  col += vec3(1.0, 0.75, 0.60)*crescent*0.22;
+
+  col *= 1.0 + uPulse*0.55;
+  col = col/(1.0 + col*0.3);
+
+  float alpha = smoothstep(1.0, 1.0 - aa, r);
+  gl_FragColor = vec4(col*alpha, alpha);
+}`;
+/** Embers/smoke points: world-sized sprites; uSide keeps only the points behind (-1) or in front (+1) of the orb centre. */
+const ORB_PTS_VS = /* glsl */ `
+attribute float aSize;
+attribute vec4 aColor;
+uniform float uHalfH;
+uniform float uSide;
+varying vec4 vColor;
+void main() {
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  float cz = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).z;
+  float front = step(cz, mv.z);
+  float keep = uSide > 0.0 ? front : 1.0 - front;
+  vColor = aColor * keep;
+  gl_PointSize = keep * aSize * projectionMatrix[1][1] * uHalfH / max(-mv.z, 0.001);
+  gl_Position = projectionMatrix * mv;
+}`;
+const ORB_PTS_FS = /* glsl */ `
+uniform sampler2D map;
+varying vec4 vColor;
+void main() {
+  vec4 s = texture2D(map, gl_PointCoord);
+  float a = s.a * vColor.a;
+  if (a < 0.004) discard;
+  gl_FragColor = vec4(min(s.rgb * vColor.rgb * 1.6, vec3(1.0)), a);
+}`;
+const rand = (a: number, b: number) => a + Math.random() * (b - a);
+function spawnEmber(e: Ember, init: boolean): Ember {
+  e.a = rand(0, TAU); e.rad = rand(1.05, 2.5); e.spd = rand(0.15, 0.4) * (1.3 / e.rad);
+  e.dy = 0; e.vy = rand(4, 20) / 200; e.size = rand(0.08, 0.15); e.max = rand(4, 10);
+  e.life = init ? rand(0, e.max) : 0; e.fl = rand(0, TAU);
+  return e;
+}
+/** Radial-gradient canvas texture (stops: [offset, css colour]). */
+function gradientTexture(size: number, stops: [number, string][], inner = 0): THREE.CanvasTexture {
+  const c = document.createElement("canvas"); c.width = c.height = size;
+  const g = c.getContext("2d")!, h = size / 2, gr = g.createRadialGradient(h, h, inner * h, h, h, h);
+  stops.forEach(([o, s]) => gr.addColorStop(o, s)); g.fillStyle = gr; g.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(c);
+}
 /** Corner floor lamps: off-ish by day, warm glow at night. */
 const LAMP = { bulbDay: 0xd4b85a, bulbNight: 0xfff5c0, light: 0xffd580, dayI: 0.05, nightI: 0.6, dist: 5, decay: 1.5 };
 
@@ -207,6 +353,7 @@ export class OfficeScene3D {
   private woodCanvas: HTMLCanvasElement;
   private GLASS: THREE.MeshLambertMaterial;
   private HIT = new THREE.MeshBasicMaterial({ visible: false });
+  private tmpQ = new THREE.Quaternion();
 
   private agents: Agent3D[] = [];
   private byId = new Map<string, Agent3D>();
@@ -959,77 +1106,163 @@ export class OfficeScene3D {
   }
 
   private toolState(s: AgentStatus): ToolStatus { return s === "working" ? "working" : s === "idle" ? "idle" : "unknown"; }
-  /** Claude Code CLI as a floating energy orb: core + inner glow + outer halo, orbiting sparks, a point light. */
+  /** Claude Code CLI as the clay/glass orb from the reference: a camera-facing shader billboard, back glow,
+      smoke tendrils + orbiting embers (drawn behind and in front of the glass), and a warm point light. */
   private buildOrb(d: AgentData, deskIdx: number): Agent3D {
+    this.hookShaderErrors();
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
     const float = new THREE.Group(); float.position.y = ORB_Y; g.add(float);
-    const sphere = (r: number, m: THREE.Material) => {
-      const s = new THREE.Mesh(this.geo(`orb${r}`, () => new THREE.SphereGeometry(r, 24, 16)), m); float.add(s); return s;
+
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: ORB_VS, fragmentShader: ORB_FS, defines: { CLAUDE_ORB: 1 },
+      uniforms: { uTime: { value: 0 }, uPulse: { value: 0 } },
+      transparent: true, depthWrite: false, side: THREE.FrontSide, premultipliedAlpha: true,
+    });
+    const plane = new THREE.Mesh(this.geo("orbPlane", () => new THREE.PlaneGeometry(1, 1)), mat);
+    plane.scale.setScalar(ORB_R * 2); plane.renderOrder = 2; float.add(plane);
+
+    // Back glow ("pendaran"): reference gradient from 0.85 R to 2.1 R.
+    const glowTex = gradientTexture(128, [[0, "rgba(217,119,87,1)"], [0.45, "rgba(160,72,45,0.37)"], [1, "rgba(110,45,25,0)"]], 0.85 / 2.1);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, opacity: 0.3 }));
+    glow.scale.setScalar(ORB_R * 2 * 2.1); glow.renderOrder = 1; float.add(glow);
+
+    // Ember sprite = the reference's glow sprite; smoke = a soft round puff tinted per point.
+    const emberTex = gradientTexture(64, [[0, "rgba(255,236,218,1)"], [0.12, "rgba(240,152,108,0.95)"], [0.38, "rgba(217,119,87,0.35)"], [1, "rgba(140,60,30,0)"]]);
+    const smokeTex = gradientTexture(64, [[0, "rgba(255,255,255,0.9)"], [0.5, "rgba(255,255,255,0.35)"], [1, "rgba(255,255,255,0)"]]);
+    const fx = new THREE.Group(); fx.rotation.set(0.22, 0, -0.32); float.add(fx); // tilted orbit plane (reference TILT)
+    const fxMats: THREE.ShaderMaterial[] = [];
+    const layer = (n: number, map: THREE.Texture): OrbLayer => {
+      const geo = new THREE.BufferGeometry();
+      const pos = new Float32Array(n * 3), col = new Float32Array(n * 4), size = new Float32Array(n);
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+      geo.setAttribute("aColor", new THREE.BufferAttribute(col, 4).setUsage(THREE.DynamicDrawUsage));
+      geo.setAttribute("aSize", new THREE.BufferAttribute(size, 1).setUsage(THREE.DynamicDrawUsage));
+      const pts = (side: number, order: number) => {
+        const m = new THREE.ShaderMaterial({
+          vertexShader: ORB_PTS_VS, fragmentShader: ORB_PTS_FS, defines: { CLAUDE_ORB: 1 },
+          uniforms: { map: { value: map }, uHalfH: { value: 300 }, uSide: { value: side } },
+          transparent: true, depthWrite: false,
+        });
+        fxMats.push(m);
+        const p = new THREE.Points(geo, m); p.frustumCulled = false; p.renderOrder = order; fx.add(p); return p;
+      };
+      return { geo, pos, col, size, back: pts(-1, 1), front: pts(1, 3) };
     };
-    const coreMat = new THREE.MeshBasicMaterial({ color: ORB_LOOK.working.core });
-    const innerMat = new THREE.MeshBasicMaterial({ color: ORB_LOOK.working.inner, transparent: true, opacity: 0.35, depthWrite: false });
-    const haloMat = new THREE.MeshBasicMaterial({ color: ORB_LOOK.working.halo, transparent: true, opacity: 0.13, depthWrite: false });
-    const core = sphere(0.35, coreMat); sphere(0.5, innerMat).renderOrder = 2;
-    const halo = sphere(0.7, haloMat); halo.renderOrder = 3;
-    const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffd08a });
-    const sparkGeo = this.geo("spark", () => new THREE.BoxGeometry(0.05, 0.05, 0.05));
-    const sparks: THREE.Mesh[] = [];
-    for (let i = 0; i < ORB_SPARKS; i++) { const m = new THREE.Mesh(sparkGeo, sparkMat); m.visible = false; g.add(m); sparks.push(m); }
-    const light = new THREE.PointLight(0xff8c00, 0, 4, 2); light.position.y = ORB_Y; g.add(light);
-    const hit = this.box(g, 1.2, 1.4, 1.2, 0, ORB_Y - 0.7, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
+    const smokeLayer = layer(ORB_TENDRILS * ORB_SEG, smokeTex), emberLayer = layer(ORB_EMBERS, emberTex);
+    const embers = Array.from({ length: ORB_EMBERS }, () => spawnEmber({} as Ember, true));
+    const tendrils: Tendril[] = Array.from({ length: ORB_TENDRILS }, () => ({
+      a0: rand(0, TAU), span: rand(1.2, 3.2), r0: rand(1.1, 1.75), shrink: rand(0.05, 0.28), speed: rand(0.12, 0.3),
+      width: rand(2, 7), phase: rand(0, TAU), wob: rand(0.03, 0.08), alpha: rand(0.35, 0.8),
+    }));
+
+    // Never toggle light.visible: a changing light count recompiles every material. Intensity only.
+    const light = new THREE.PointLight(0xff8c00, 0, 4, 2); float.add(light);
+    const hit = this.box(g, 1.1, 1.3, 1.1, 0, ORB_Y - 0.65, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
     const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)),
       new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; ring.renderOrder = 5; g.add(ring);
-    const tag = this.textSprite(320, 72, 2.8, 0.63); tag.sp.renderOrder = 30; tag.sp.position.set(0, ORB_Y + 1.05, 0); g.add(tag.sp);
+    const tag = this.textSprite(320, 72, 2.8, 0.63); tag.sp.renderOrder = 30; tag.sp.position.set(0, ORB_Y + ORB_R + 0.45, 0); g.add(tag.sp);
     // Person-only parts (limbs, bubbles) are inert stand-ins: orbs never walk, pose or use them.
     const stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
     const a: Agent3D = {
       data: d, group: g, body, lightMat: new THREE.MeshBasicMaterial(), shirt: new THREE.MeshLambertMaterial(),
       legL: new THREE.Group(), legR: new THREE.Group(), armL: new THREE.Group(), armR: new THREE.Group(),
       book: hit, hit, ring, tag, zzz: stub, dots: stub, excl: stub,
-      spot: null, path: [], floor: 1, lastNode: "hubC", pose: "stand", atSpot: false, deskIdx, since: null, phase: 0,
-      orb: { state: "unknown", float, core, coreMat, innerMat, halo, haloMat, sparks, sparkMat, light, tagClock: 0 },
+      spot: null, path: [], floor: 1, lastNode: "hubW", pose: "stand", atSpot: false, deskIdx, since: null, phase: 0,
+      orb: {
+        state: "unknown", float, plane, mat, fallback: null, glow, fx, embers, tendrils, emberLayer, smokeLayer,
+        fxMats, textures: [emberTex, smokeTex], light, pulse: 0, spin: 0, time: 0, tagClock: 0,
+      },
     };
     hit.userData.agent = a;
     this.applyOrb(a);
+    this.stepOrb(a, 0, 0); // fill the particle buffers before the first render
     this.drawTag(a);
     return a;
   }
-  /** Colours/opacities/light for the orb's current tool state. */
+  /** Route GL compile/link errors: a failing orb shader swaps to a plain glowing disc instead of rendering nothing. */
+  private hookShaderErrors() {
+    if (this.renderer.debug.onShaderError) return;
+    this.renderer.debug.onShaderError = (gl, program, vs, fs) => {
+      console.error("[office3d] shader error", gl.getProgramInfoLog(program), gl.getShaderInfoLog(vs), gl.getShaderInfoLog(fs));
+      if ((gl.getShaderSource(fs) ?? "").includes("CLAUDE_ORB")) for (const a of this.agents) if (a.orb) this.orbFallback(a);
+    };
+  }
+  private orbFallback(a: Agent3D) {
+    const o = a.orb!; if (o.fallback) return;
+    // Same as the reference's 2D fallback: an offset radial gradient disc.
+    const tex = gradientTexture(128, [[0, "#ffd2b8"], [0.25, "#d97757"], [0.75, "#6b2d1a"], [0.97, "#c46a4c"], [1, "rgba(196,106,76,0)"]]);
+    o.textures.push(tex);
+    o.fallback = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+    o.plane.material = o.fallback; o.fx.visible = false; o.fx.userData.off = true;
+    console.warn("[office3d] Claude CLI orb shader failed to compile; using the simple glowing disc");
+  }
+  /** State change: pulse kick on entering "working", particles/light per state. */
   private applyOrb(a: Agent3D) {
-    const o = a.orb!; o.state = this.toolState(a.data.status);
-    const L = ORB_LOOK[o.state];
-    o.coreMat.color.setHex(L.core); o.innerMat.color.setHex(L.inner); o.innerMat.opacity = L.innerOp;
-    o.haloMat.color.setHex(L.halo); o.haloMat.opacity = L.haloOp; o.halo.scale.setScalar(1);
-    // Never toggle light.visible: a changing light count recompiles every material. Intensity only.
-    o.light.intensity = L.light * Math.PI;
-    const on = o.state === "working";
-    o.sparks.forEach((s, i) => {
-      s.visible = on;
-      if (on) { const ang = (i / o.sparks.length) * Math.PI * 2; s.position.set(Math.cos(ang) * 0.75, ORB_Y, Math.sin(ang) * 0.55); }
-    });
-    if (o.state === "unknown") o.float.position.y = ORB_Y;
+    const o = a.orb!, prev = o.state; o.state = this.toolState(a.data.status);
+    if (o.state === "working" && prev !== "working") {
+      o.pulse = 1;
+      for (const e of o.embers) e.vy += rand(10, 35) / 200; // reference trigger(): embers jump outwards/up
+    }
+    if (o.state === "unknown") { o.pulse = 0; o.float.position.y = ORB_Y; }
+    o.fx.visible = o.state !== "unknown" && !o.fx.userData.off;
+    o.light.intensity = o.state === "idle" ? 0.1 * Math.PI : 0;
     this.dirty = true;
   }
-  private stepOrb(a: Agent3D, dt: number, t: number) {
-    const o = a.orb!;
-    if (this.reduce) return;
-    const working = o.state === "working";
-    o.float.rotation.y += dt * (working ? 0.9 : 0.3);
-    if (o.state !== "unknown") o.float.position.y = ORB_Y + Math.sin(t * 1.2) * 0.15;
+  private stepOrb(a: Agent3D, dt: number, _t: number) {
+    const o = a.orb!, working = o.state === "working", idle = o.state === "idle";
+    const d = dt * (this.reduce ? 0.35 : 1); // reference: prefers-reduced-motion slows everything to 0.35x
+    o.time = (o.time + d) % 900;
+    o.pulse *= Math.exp(-d * 2.2);
+    if (working) o.pulse = Math.max(o.pulse, 0.3); else if (!idle) o.pulse = 0;
+    o.spin += d * (1 + o.pulse * 3);
+    const T = o.time, P = o.pulse;
+    o.mat.uniforms.uTime.value = T; o.mat.uniforms.uPulse.value = P;
+
+    if (!this.reduce && o.state !== "unknown") o.float.position.y = ORB_Y + (working ? Math.sin(T * 2.4) * 0.14 : Math.sin(T * 1.25) * 0.05);
+    o.plane.scale.setScalar(ORB_R * 2 * (1 + 0.012 * Math.sin(T * 1.25) + P * 0.035));
+    // Billboard: cancel the parents' rotation, then take the camera's.
+    o.float.getWorldQuaternion(this.tmpQ).invert();
+    o.plane.quaternion.copy(this.tmpQ).multiply(this.camera.quaternion);
+    (o.glow.material as THREE.SpriteMaterial).opacity = o.state === "unknown" ? 0.12 : Math.min(1, 0.3 + 0.07 * Math.sin(T * 1.3) + P * 0.35);
+    if (working) o.light.intensity = (1 + Math.min(1, P * 0.65 + 0.35 * (0.5 + 0.5 * Math.sin(T * 2.6)))) * Math.PI;
+
+    if (o.fx.visible) {
+      const halfH = this.renderer.domElement.height * 0.5;
+      for (const m of o.fxMats) m.uniforms.uHalfH.value = halfH;
+      // Smoke tendrils: arcs of soft puffs swirling round the glass (reference drawFX, R units -> world).
+      const S = o.smokeLayer, sA = working ? 1 : 0.45;
+      let i = 0;
+      for (const td of o.tendrils) {
+        for (let k = 0; k < ORB_SEG; k++, i++) {
+          const s = k / (ORB_SEG - 1), ang = td.a0 + td.speed * o.spin + s * td.span;
+          const rad = ORB_R * (td.r0 - td.shrink * s + td.wob * Math.sin(s * 6 + T * 0.8 + td.phase));
+          const taper = Math.pow(Math.sin(Math.PI * s), 0.8);
+          S.pos[i * 3] = Math.cos(ang) * rad; S.pos[i * 3 + 1] = 0.04 * Math.sin(s * 5 + T + td.phase); S.pos[i * 3 + 2] = Math.sin(ang) * rad;
+          // dark rust outside -> warm clay along the bright middle of each tendril
+          const w = taper * 0.8;
+          S.col[i * 4] = (112 + (242 - 112) * w) / 255; S.col[i * 4 + 1] = (46 + (152 - 46) * w) / 255; S.col[i * 4 + 2] = (28 + (112 - 28) * w) / 255;
+          S.col[i * 4 + 3] = td.alpha * taper * 0.42 * sA;
+          S.size[i] = (0.05 + (td.width / 7) * 0.2) * (0.35 + 0.65 * taper);
+        }
+      }
+      // Embers: orbit, drift upwards, flicker, respawn (reference maths; speed x2 working, barely moving idle).
+      const E = o.emberLayer, boost = (1 + P * 3) * (working ? 2 : 0.25), eA = working ? 1 : 0.25;
+      o.embers.forEach((e, j) => {
+        e.life += d; if (e.life > e.max) spawnEmber(e, false);
+        e.a += e.spd * d * boost; e.vy *= Math.exp(-d * 0.4); e.dy += e.vy * d * 0.6;
+        E.pos[j * 3] = Math.cos(e.a) * e.rad * ORB_R; E.pos[j * 3 + 1] = Math.min(e.dy, 1.6) * ORB_R; E.pos[j * 3 + 2] = Math.sin(e.a) * e.rad * ORB_R;
+        const k = Math.sin(Math.PI * (e.life / e.max)), al = Math.max(0, k * (0.55 + 0.45 * Math.sin(T * 7 + e.fl)));
+        const c = (j % 5) / 4; // #F97316 -> #c43c18
+        E.col[j * 4] = (249 + (196 - 249) * c) / 255; E.col[j * 4 + 1] = (115 + (60 - 115) * c) / 255; E.col[j * 4 + 2] = (22 + (24 - 22) * c) / 255;
+        E.col[j * 4 + 3] = Math.min(1, al * eA);
+        E.size[j] = e.size * (1 + P * 0.6);
+      });
+      for (const L of [S, E]) for (const n of ["position", "aColor", "aSize"]) L.geo.getAttribute(n).needsUpdate = true;
+    }
     if (!working) return;
-    const p = 0.5 + 0.5 * Math.sin((t * Math.PI * 2) / 0.8); // 0..1, 0.8 s cycle
-    o.halo.scale.setScalar(0.9 + p * 0.5);
-    o.light.intensity = (0.8 + p * 0.8) * Math.PI;
-    const cy = o.float.position.y;
-    o.sparks.forEach((s, i) => {
-      const sp = 0.8 + i * 0.15, ph = i * 2.399, ang = t * sp + ph;
-      const rx = 0.62 + (i % 3) * 0.1, rz = 0.45 + (i % 4) * 0.07;
-      s.position.set(Math.cos(ang) * rx, cy + Math.sin(ang * 1.7 + ph) * 0.28, Math.sin(ang) * rz);
-      s.rotation.set(ang, ang * 1.3, 0);
-    });
     o.tagClock += dt; // pulse the label's status dot (~12 redraws/s)
-    if (o.tagClock > 0.08) { o.tagClock = 0; this.drawTag(a, 0.5 + 0.5 * Math.sin(t * 5)); }
+    if (o.tagClock > 0.08) { o.tagClock = 0; this.drawTag(a, 0.5 + 0.5 * Math.sin(T * 5)); }
   }
   private addAgent(id: string, status: AgentStatus, name: string, task: string | null | undefined, meta: AgentMeta) {
     const used = new Set(this.agents.map((x) => x.deskIdx));
@@ -1044,10 +1277,10 @@ export class OfficeScene3D {
     };
     const a = this.buildAgent(d, desk);
     this.agents.push(a); this.byId.set(id, a);
-    if (a.orb) { // hovers over its own desk chair; never walks
+    if (a.orb) { // floats in the Lantai 1 lobby; never walks. Its desk stays reserved (screen glows while working).
       const ds = this.spots.filter((x) => x.use[0] === "desk"), s = ds[a.deskIdx % ds.length];
-      this.claim(a, s); a.floor = s.floor; this.floors[s.floor].add(a.group);
-      a.group.position.set(s.x, 0, s.z); a.lastNode = s.node; a.atSpot = true; this.deskGlow(a);
+      this.claim(a, s); a.floor = 1; this.F1.add(a.group);
+      a.group.position.set(ORB_POS.x, 0, ORB_POS.z); a.atSpot = true; this.deskGlow(a);
     } else {
       const s = this.pickSpot(a);
       if (s) this.place(a, s);
@@ -1065,7 +1298,11 @@ export class OfficeScene3D {
       if ((o as THREE.Sprite).isSprite) { const sm = m.material as THREE.SpriteMaterial; sm.map?.dispose(); sm.dispose(); }
     });
     a.shirt.dispose(); a.lightMat.dispose(); (a.ring.material as THREE.Material).dispose();
-    if (a.orb) { const o = a.orb; [o.coreMat, o.innerMat, o.haloMat, o.sparkMat].forEach((m) => m.dispose()); o.light.dispose(); }
+    if (a.orb) {
+      const o = a.orb; // glow sprite material/map are disposed by the sprite traversal above
+      [o.mat, ...o.fxMats, ...(o.fallback ? [o.fallback] : [])].forEach((m) => m.dispose());
+      o.textures.forEach((t) => t.dispose()); o.emberLayer.geo.dispose(); o.smokeLayer.geo.dispose(); o.light.dispose();
+    }
     this.agents = this.agents.filter((x) => x !== a); this.byId.delete(a.data.id);
     if (this.selected === a) this.selected = null;
     this.dirty = true;
