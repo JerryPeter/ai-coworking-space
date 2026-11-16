@@ -15,6 +15,7 @@ import {
   type TileKind, type WallItem,
 } from "./pixel-layout";
 import type { OfficeRenderer } from "./types";
+import { buildFurniture, crtScreen, deskGeo, drawBulbs, drawWallFurniture, type FurnitureSet } from "./pixel-furniture";
 
 export type PixelSceneOptions = SceneOptions;
 
@@ -35,6 +36,8 @@ export class PixelOfficeScene implements OfficeRenderer {
   private statics = new Map<string, HTMLCanvasElement>();
   /** Per-floor frame buffers (static blit + dynamic layers). */
   private frames: HTMLCanvasElement[] = [];
+  private furniture = new Map<string, FurnitureSet>();
+  private agentHex: Record<string, string> = {};
 
   constructor(private host: HTMLElement, private opts: PixelSceneOptions) {
     this.canvas = document.createElement("canvas");
@@ -47,6 +50,7 @@ export class PixelOfficeScene implements OfficeRenderer {
     if (!ctx) throw new Error("Canvas 2D is not available in this browser");
     this.ctx = ctx;
     this.frames = [this.makeBuffer(), this.makeBuffer()];
+    opts.characters.forEach((c) => { this.agentHex[c.id] = c.hex; });
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(host);
     this.resize();
@@ -120,6 +124,7 @@ export class PixelOfficeScene implements OfficeRenderer {
       const fctx = frame.getContext("2d")!;
       fctx.imageSmoothingEnabled = false;
       fctx.drawImage(this.staticFor(p.floor), 0, 0);
+      this.drawDynamic(fctx, p.floor);
       const bw = Math.round(BUF_W * p.s), bh = Math.round(BUF_H * p.s);
       if (p.floor === 1 && this.panels.length === 1) {
         // Single Floor 1 view: continue the sky past the buffer edges so it doesn't read as a box.
@@ -197,6 +202,30 @@ export class PixelOfficeScene implements OfficeRenderer {
 
     // Layer 3 — back walls with windows, curtains, shelves, whiteboard/TV
     this.drawWalls(ctx, f);
+    drawWallFurniture(ctx, p, f);
+
+    // Layer 4 — furniture, depth-sorted back → front (long pieces pre-sliced)
+    const set = this.furnitureFor(f);
+    for (const it of set.items) it.draw(ctx);
+    drawBulbs(ctx, p, set.bulbs);
+  }
+
+  private furnitureFor(f: FloorId) {
+    const key = `${f}-${this.tod}`;
+    let set = this.furniture.get(key);
+    if (!set) { set = buildFurniture(f, this.pal, this.agentHex); this.furniture.set(key, set); }
+    return set;
+  }
+
+  // ---------------- dynamic layers (per frame) ----------------
+  private drawDynamic(ctx: Ctx, f: FloorId) {
+    const p = this.pal;
+    if (f === 0) {
+      for (const id of Object.keys(this.agentHex)) {
+        const g = deskGeo(id);
+        if (g) fillPoly(ctx, crtScreen(g), p.crtScreenOff);
+      }
+    }
   }
 
   private drawSky(ctx: Ctx) {
