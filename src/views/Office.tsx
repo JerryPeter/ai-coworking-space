@@ -1,111 +1,167 @@
-// 3D Office (spec 6.7 + 7). Lazy-loaded so only this view pays for Three.js.
-// Polls /api/office/state every 5 s. Characters only show "working" when the API says so
-// (a kanban claim, or a live session lease with activity < 10 min ago; see state_source).
-// TODO Phase 2: add OpenClaw team to 3D office (needs desk layout from Susi)
-import { Moon, Sun } from "lucide-react";
+// 3D Office: realistic two-floor office (port of the "AI Office 3D" HTML reference), lazy-loaded
+// so only this view pays for Three.js. REAL data only, no simulation:
+// - /api/office/state every 5 s → Hermes agents + Claude Code CLI
+// - /api/openclaw/agents every 15 s → OpenClaw team (chief / researcher / writer / reviewer)
+// The scene owns its own roster + detail panel (right side); clicking a Hermes agent or Claude CLI
+// also opens the AgentDrawer via ?agent=<id>. OpenClaw agents have no drawer yet.
+import { Moon, Sun, Tag } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { endpoints, useApi } from "../api/client";
-import type { OfficeState, ToolState } from "../api/types";
-import { PixelAvatar } from "../components/ui/PixelAvatar";
+import type { OfficeAgent, OfficeState, OpenClawAgent, ToolState } from "../api/types";
 import { ErrorPanel } from "../components/ui/States";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { officeBadge, toolBadge } from "../lib/derive";
 import { setParams, useRoute } from "../lib/router";
 import { relative, useNow } from "../lib/time";
-import { OfficeScene, webglAvailable, type Preset } from "../office/OfficeScene";
-import { hasSeat, loungeSpotFor } from "../office/layout";
-import type { RobotState } from "../office/characters";
+import { CLAUDE_AGENT_ID, OfficeScene3D, STATUS, webglAvailable, type AgentStatus, type Preset } from "../office/OfficeScene3D";
 import { readTod, store, TOD_KEY, type TimeOfDay } from "../office/palettes";
-import type { OfficeRenderer } from "../office/types";
-import { AGENTS, CLAUDE, CLAUDE_ID, identity, rosterIndex } from "../theme/agents";
+import { AGENTS, identity, rosterIndex } from "../theme/agents";
 
-const LABEL: Record<OfficeState, string> = { working: "Working", reviewing: "Reviewing", idle: "Idle", offline: "Offline", unknown: "Unknown" };
-const robotState = (s: ToolState | undefined): RobotState => (s === "working" ? "running" : s === "idle" ? "not_running" : "unknown");
-const ROBOT_LABEL: Record<RobotState, string> = { running: "Running", not_running: "Not running", unknown: "Unknown" };
-const PRESET_LABEL: Record<Preset, string> = { overview: "Overview", workspace: "Floor 0 · Workspace", lounge: "Floor 1 · Lounge" };
-const ZONE_NAME = { tv: "TV corner", balcony: "Balcony", nap: "Rest room", commons: "Commons" } as const;
+const PRESETS: { p: Preset; label: string; title: string }[] = [
+  { p: "workspace", label: "Lantai 1", title: "Lantai 1: Ruang Kerja, Meeting, Tamu, Island Hangout (Lantai 2 disembunyikan)" },
+  { p: "lounge", label: "Lantai 2", title: "Lantai 2: Kamar Tidur, Sofa Baca, Ruang Game, Tempat Istirahat, Balkon" },
+  { p: "overview", label: "Semua", title: "Kedua lantai" },
+];
+
+// OpenClaw team: the Agents view cards have no per-agent colour, so these are picked from the
+// reference's SHIRTS palette, chosen to stay distinct from the Hermes + Claude colours.
+const OPENCLAW_ORDER = ["chief", "researcher", "writer", "reviewer"];
+const OPENCLAW_COLOR: Record<string, string> = { chief: "#e2a91a", researcher: "#22a3b3", writer: "#2f9e6f", reviewer: "#6b7785" };
+const OPENCLAW_FALLBACK = ["#e4572e", "#3d7fd9", "#8a5cd0", "#d9488f"];
+const OPENCLAW_RECENT_MS = 30 * 60_000; // last run within 30 min → "break", else idle
+const ocId = (name: string) => `openclaw:${name}`;
+
+/** /api/office/state → scene status. working (kanban or session) → desk, reviewing → meeting room. */
+function officeStatus(s: OfficeState): AgentStatus {
+  switch (s) {
+    case "working": return "working";
+    case "reviewing": return "meeting";
+    case "idle": return "idle";
+    case "offline": return "offline";
+    default: return "error"; // unknown
+  }
+}
+function openclawStatus(a: OpenClawAgent, now: number): AgentStatus {
+  if (a.is_running) return "working";
+  const t = a.last_run_at ? Date.parse(a.last_run_at) : NaN;
+  return !isNaN(t) && now - t < OPENCLAW_RECENT_MS ? "break" : "idle";
+}
+const ZONE: Record<AgentStatus, string> = {
+  working: "Lantai 1 · Ruang Kerja", meeting: "Lantai 1 · Ruang Meeting", waiting: "Lantai 1 · Ruang Tamu",
+  idle: "Area santai (Lantai 1/2)", break: "Lantai 2 · Ruang Game / Tempat Istirahat", offline: "Lantai 2 · Kamar Tidur", error: "Lantai 1 · Ruang Kerja",
+};
+const toolStatus = (s: ToolState | undefined): AgentStatus => (s === "working" ? "working" : s === "idle" ? "idle" : "offline");
+const hermesTask = (a: OfficeAgent) => a.current_task?.title || a.last_activity || null;
+const known = (v: string) => (v === "Not Available" ? null : v);
 
 export default function Office() {
   const office = useApi(endpoints.office, 5_000);
+  const oc = useApi(endpoints.openclaw, 15_000);
   const { params } = useRoute();
   const now = useNow(5_000);
   const host = useRef<HTMLDivElement>(null);
-  const scene = useRef<OfficeRenderer | null>(null);
+  const scene = useRef<OfficeScene3D | null>(null);
   const [ready, setReady] = useState(false);
   const [gl] = useState(webglAvailable);
   const [preset, setPreset] = useState<Preset>("overview");
-  const [voxelError, setVoxelError] = useState<string | null>(null);
+  const [sceneError, setSceneError] = useState<string | null>(null);
   const [tod, setTod] = useState<TimeOfDay>(readTod);
-  // No WebGL (or the 3D scene failed to start) → table fallback below.
-  const voxelOk = gl && !voxelError;
-  // Latest UI state for a freshly mounted renderer, read without re-running the mount effect.
-  const ui = useRef({ tod, preset });
-  ui.current = { tod, preset };
+  const [labels, setLabels] = useState(true);
+  const ui = useRef({ tod, preset, labels });
+  ui.current = { tod, preset, labels };
   const focusParam = params.get("focus");
+  const sceneOk = gl && !sceneError;
 
-  // Mount the renderer once; dispose runs on every view navigation.
+  // Mount the scene once; dispose runs on every view navigation.
   useEffect(() => {
-    if (!host.current || !voxelOk) return;
+    if (!host.current || !sceneOk) return;
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    const opts = {
-      characters: AGENTS.map((a) => ({ id: a.id, hex: a.hex, shortName: a.shortName, index: rosterIndex(a.id) })),
-      robot: { id: CLAUDE_ID, hex: CLAUDE.hex, shortName: CLAUDE.shortName, index: rosterIndex(CLAUDE_ID) },
-      onSelect: (id: string) => setParams({ agent: id, tab: null }),
-      onFirstFrame: () => setReady(true),
-      onPresetChange: setPreset,
-      reducedMotion,
-    };
-    let s: OfficeRenderer;
+    let s: OfficeScene3D;
     try {
-      s = new OfficeScene(host.current, opts);
+      s = new OfficeScene3D(host.current, {
+        // OpenClaw agents have no drawer yet; the in-scene detail panel still shows them.
+        onSelect: (id) => { if (!id.startsWith("openclaw:")) setParams({ agent: id, tab: null }); },
+        onFirstFrame: () => setReady(true),
+        onPresetChange: setPreset,
+        reducedMotion,
+      });
     } catch (e) {
-      setVoxelError((e as Error).message);
+      setSceneError((e as Error).message);
       return;
     }
     scene.current = s;
-    s.setTimeOfDay(ui.current.tod, { instant: true }); // persisted choice, no tween on first paint
+    s.setTimeOfDay(ui.current.tod, { instant: true });
+    s.setLabels(ui.current.labels);
     if (ui.current.preset !== "overview") s.preset(ui.current.preset);
     return () => { s.dispose(); scene.current = null; setReady(false); };
-  }, [voxelOk]);
+  }, [sceneOk]);
 
-  const toggleTod = () => {
-    const next: TimeOfDay = tod === "day" ? "night" : "day";
+  const chooseTod = (next: TimeOfDay) => {
+    if (next === tod) return;
     setTod(next);
     store(TOD_KEY, next);
     scene.current?.setTimeOfDay(next);
   };
 
-  // Push API state into the scene (re-runs on `ready`, so a newly mounted renderer gets it at once).
+  // Push real API state into the scene (re-runs on `ready`, so a fresh scene gets it at once).
   const data = office.data;
+  const ocData = oc.data;
   useEffect(() => {
     const s = scene.current;
-    if (!s || !data) return;
-    data.agents.forEach((a) => s.setAgentState(a.name, a.state, LABEL[a.state] ?? "Unknown", a.last_activity || a.current_task?.title || null));
-    const rs = robotState(data.claude_tool?.state);
-    s.setRobotState(rs, ROBOT_LABEL[rs]);
-  }, [data, ready]);
+    if (!s) return;
+    const ids: string[] = [];
+    if (data) {
+      [...data.agents].sort((a, b) => rosterIndex(a.name) - rosterIndex(b.name)).forEach((a) => {
+        const ident = identity(a.name), ri = rosterIndex(a.name);
+        s.setAgentState(a.name, officeStatus(a.state), a.display_name || ident.displayName, hermesTask(a), {
+          role: known(ident.role), color: ident.hex, desk: ri < AGENTS.length ? ri : undefined,
+          lastActive: a.last_activity_at, reason: a.state_reason,
+        });
+        ids.push(a.name);
+      });
+      s.setRobotState(data.claude_tool?.state ?? "unknown", data.claude_tool?.detail ?? "");
+      ids.push(CLAUDE_AGENT_ID);
+    } else ids.push(...s.agentIds().filter((id) => !id.startsWith("openclaw:")));
+    if (ocData) {
+      const ocRank = (n: string) => { const i = OPENCLAW_ORDER.indexOf(n); return i < 0 ? 99 : i; };
+      [...ocData.agents].sort((a, b) => ocRank(a.name) - ocRank(b.name)).forEach((a, i) => {
+        const oi = OPENCLAW_ORDER.indexOf(a.name);
+        s.setAgentState(ocId(a.name), openclawStatus(a, now), a.display_name || a.name, null, {
+          role: a.theme ? `${a.theme} (OpenClaw)` : "OpenClaw agent",
+          color: OPENCLAW_COLOR[a.name] ?? OPENCLAW_FALLBACK[i % OPENCLAW_FALLBACK.length],
+          desk: oi >= 0 ? 5 + oi : undefined,
+          lastActive: a.last_run_at,
+          reason: a.error ?? (a.is_running ? "OpenClaw: sedang berjalan" : `OpenClaw gateway ${a.gateway_status}`),
+        });
+        ids.push(ocId(a.name));
+      });
+    } else ids.push(...s.agentIds().filter((id) => id.startsWith("openclaw:")));
+    s.retainAgents(ids);
+  }, [data, ocData, ready, now]);
 
-  // ?focus=<id> (from "Open in 3D Office"): tween to the character once the scene is up.
+  // ?focus=<id> (from "Open in 3D Office"): fly to the character once the scene is up.
   useEffect(() => {
     if (!ready || !focusParam || !scene.current) return;
     scene.current.focus(focusParam);
     setParams({ focus: null }, true);
   }, [ready, focusParam]);
 
-  // Agents per floor by their target floor (idle → Floor 1 lounge, everything else → Floor 0 desk).
-  const seated = (data?.agents ?? []).filter((a) => hasSeat(a.name));
-  const onFloor = { workspace: seated.filter((a) => a.state !== "idle").length, lounge: seated.filter((a) => a.state === "idle").length };
-
-  const legend = [
-    ...[...(data?.agents ?? [])].sort((a, b) => rosterIndex(a.name) - rosterIndex(b.name)).map((a) => ({
-      id: a.name, name: identity(a.name).displayName, seat: hasSeat(a.name),
-      badge: <StatusBadge status={officeBadge(a.state)} compact title={`${LABEL[a.state]}: ${a.state_reason}`} />, label: LABEL[a.state],
-    })),
-    { id: CLAUDE_ID, name: "Claude Code CLI", seat: true, badge: <StatusBadge status={toolBadge(data?.claude_tool?.state)} compact title={data?.claude_tool?.detail ?? undefined} />, label: ROBOT_LABEL[robotState(data?.claude_tool?.state)] },
-  ];
-
-  const initError = !gl ? "WebGL is not available in this browser" : voxelError;
+  const initError = !gl ? "WebGL is not available in this browser" : sceneError;
   if (initError) {
+    const rows = [
+      ...[...(data?.agents ?? [])].sort((a, b) => rosterIndex(a.name) - rosterIndex(b.name)).map((a) => ({
+        key: a.name, name: a.display_name || identity(a.name).displayName, zone: ZONE[officeStatus(a.state)],
+        badge: <StatusBadge status={officeBadge(a.state)} />, reason: a.state_reason,
+      })),
+      ...(data ? [{
+        key: CLAUDE_AGENT_ID, name: "Claude Code CLI", zone: ZONE[toolStatus(data.claude_tool?.state)],
+        badge: <StatusBadge status={toolBadge(data.claude_tool?.state)} />, reason: data.claude_tool?.detail ?? "–",
+      }] : []),
+      ...(ocData?.agents ?? []).map((a) => {
+        const st = openclawStatus(a, now);
+        return { key: ocId(a.name), name: `${a.display_name} (OpenClaw)`, zone: ZONE[st], badge: <span className="xs">{STATUS[st].label}</span>, reason: a.error ?? "–" };
+      }),
+    ];
     return (
       <div className="webgl-fallback stack">
         <ErrorPanel what="the office view" error={new Error(initError)} />
@@ -113,21 +169,9 @@ export default function Office() {
           <table className="simple">
             <thead><tr><th>Agent</th><th>Zone</th><th>Status</th><th>Reason</th></tr></thead>
             <tbody>
-              {[...(data?.agents ?? [])].sort((a, b) => rosterIndex(a.name) - rosterIndex(b.name)).map((a) => (
-                <tr key={a.name}>
-                  <td>{identity(a.name).displayName}</td>
-                  <td>{a.state === "idle" ? `Floor 1 · Lounge${hasSeat(a.name) ? ` (${ZONE_NAME[loungeSpotFor(a.name).zone]})` : ""}` : "Floor 0 · Workspace"}</td>
-                  <td><StatusBadge status={officeBadge(a.state)} /></td>
-                  <td className="xs secondary">{a.state_reason}</td>
-                </tr>
+              {rows.map((r) => (
+                <tr key={r.key}><td>{r.name}</td><td>{r.zone}</td><td>{r.badge}</td><td className="xs secondary">{r.reason}</td></tr>
               ))}
-              {data && (
-                <tr>
-                  <td>Claude Code CLI</td><td>Floor 0 · Tool bench</td>
-                  <td><StatusBadge status={toolBadge(data.claude_tool?.state)} /></td>
-                  <td className="xs secondary">{data.claude_tool?.detail ?? "Not Available"}</td>
-                </tr>
-              )}
             </tbody>
           </table>
           {!data && <p className="sm muted" style={{ padding: 16 }}>{office.error ? office.error.message : "Loading office state…"}</p>}
@@ -136,44 +180,34 @@ export default function Office() {
     );
   }
 
+  const errors = [office.error && `Office: ${office.error.message}`, oc.error && `OpenClaw: ${oc.error.message}`].filter(Boolean);
   return (
     <div className="office">
       <div className="office-frame">
         <div ref={host} className={`office-canvas${ready ? " ready" : ""}`} />
         <div className="ov ov-tl">
           <div className="segmented" role="radiogroup" aria-label="Time of day">
-            <button className="icon tod-day" role="radio" aria-checked={tod === "day"} aria-pressed={tod === "day"} aria-label="Day" title="Day mode"
-              onClick={() => tod !== "day" && toggleTod()}><Sun size={16} /></button>
-            <button className="icon tod-night" role="radio" aria-checked={tod === "night"} aria-pressed={tod === "night"} aria-label="Night" title="Night mode"
-              onClick={() => tod !== "night" && toggleTod()}><Moon size={16} /></button>
+            <button className="icon tod-day" role="radio" aria-checked={tod === "day"} aria-pressed={tod === "day"} aria-label="Day" title="Siang"
+              onClick={() => chooseTod("day")}><Sun size={16} /></button>
+            <button className="icon tod-night" role="radio" aria-checked={tod === "night"} aria-pressed={tod === "night"} aria-label="Night" title="Malam"
+              onClick={() => chooseTod("night")}><Moon size={16} /></button>
           </div>
           <span className="ov-sep" aria-hidden="true" />
-          <div className="segmented" role="group" aria-label="Camera preset and floor">
-            {(["overview", "workspace", "lounge"] as Preset[]).map((p) => (
-              <button key={p} aria-pressed={preset === p} onClick={() => { setPreset(p); scene.current?.preset(p); }}
-                title={p === "overview" ? "Both floors" : p === "workspace" ? "Floor 0 only (Floor 1 hidden)" : "Floor 1 lounge"}>
-                {PRESET_LABEL[p]}
-                {p !== "overview" && data && <span className="floor-count" aria-label={`${onFloor[p]} agents on this floor`}>{onFloor[p]}</span>}
-              </button>
+          <div className="segmented" role="group" aria-label="Pilih lantai">
+            {PRESETS.map(({ p, label, title }) => (
+              <button key={p} aria-pressed={preset === p} title={title} onClick={() => { setPreset(p); scene.current?.preset(p); }}>{label}</button>
             ))}
           </div>
+          <span className="ov-sep" aria-hidden="true" />
+          <div className="segmented">
+            <button className="icon" aria-pressed={labels} aria-label="Label ruang" title="Label ruang"
+              onClick={() => { setLabels(!labels); scene.current?.setLabels(!labels); }}><Tag size={16} /></button>
+          </div>
         </div>
-        <div className="ov ov-tr" aria-label="Characters">
-          {legend.map((r) => (
-            <button key={r.id} className="legend-row" disabled={!r.seat}
-              onClick={() => { scene.current?.focus(r.id); setParams({ agent: r.id, tab: null }); }}
-              title={r.seat ? `Focus ${r.name}` : "No desk assigned in the office layout"}>
-              <PixelAvatar id={r.id} size={20} tile={false} />
-              <span className="nm truncate">{r.name}</span>
-              {r.badge}
-              <span className="xs secondary">{r.label}</span>
-            </button>
-          ))}
-          {office.error && <div className="xs" style={{ color: "var(--outcome-failed)", padding: "4px 6px" }}>{office.error.message}</div>}
-        </div>
-        <div className="ov ov-bl">Drag to orbit · Scroll to zoom · Click a character for details · Use the floor buttons to switch floors</div>
+        <div className="ov ov-bl">Seret untuk memutar · gulir untuk zoom · klik kanan untuk menggeser · klik agent untuk detail</div>
         <div className="ov ov-br tabular">
           {office.updatedAt ? `State updated ${relative(office.updatedAt, now)} · every 5s` : "Loading state…"}
+          {errors.map((e) => <div key={e} className="xs" style={{ color: "var(--outcome-failed)" }}>{e}</div>)}
         </div>
       </div>
     </div>
