@@ -5,7 +5,7 @@ only renders. Inputs, all read-only:
   - gateway liveness      <profile>/gateway.lock + /proc                 (sources/profiles.py)
   - task claims           ~/.hermes/kanban.db: tasks (running|review)    (sources/kanban.py)
   - last activity         <profile>/state.db: sessions                   (sources/state.py)
-  - open chat leases      <profile>/runtime/active_sessions.json         (sources/leases.py, info only)
+  - open chat leases      <profile>/runtime/active_sessions.json         (sources/leases.py)
   - Claude Code CLI       /proc/*/cmdline scan for `claude -p`           (sources/claude_tool.py)
 
 State rules, first match wins (never guessed):
@@ -15,9 +15,12 @@ State rules, first match wins (never guessed):
   3. working   - a kanban task assigned to this profile is in Running
   4. reviewing - a kanban task assigned to this profile is in Review
                  (= task sits in the Review column; not proof someone is reviewing right now)
-  5. idle      - gateway running, nothing claimed
+  5. working   - no kanban claim, but session_leases.live_count > 0 AND the profile's state.db
+                 last_activity_at is less than SESSION_ACTIVE_MIN (10) minutes ago
+                 (state_source = "session"; lease alone or recency alone is not enough)
+  6. idle      - gateway running, nothing claimed, no live+recent session
 v1's "kanban list truncated -> unknown" branch cannot occur: claimed_tasks() is a targeted query.
-Session leases are reported but do NOT change the state (v1 had no rule for them).
+state_source: "kanban" (rules 3/4), "session" (rule 5), else None.
 
 desk_index is the profile's position in list_profiles() (sorted by name; "default" included),
 so each agent keeps a fixed seat whatever its state. Profiles beyond DESK_COUNT get None.
@@ -30,6 +33,7 @@ from api.sources.profiles import agent_info
 DESK_COUNT = 4
 STATES = ("working", "reviewing", "idle", "offline", "unknown")
 ACTIVE_WINDOW_MIN = 15  # idle agents active within this many minutes get active_ago_min
+SESSION_ACTIVE_MIN = 10  # live lease + activity within this many minutes => working (no kanban claim needed)
 # Dark-theme --agent-* values from Susi's design spec (mission-control-v2-design-spec.md §tokens).
 # Frontend should prefer its theme-aware CSS tokens; this is the reference value for the 3D scene.
 AGENT_COLORS = {
@@ -42,7 +46,8 @@ CLAUDE_TOOL_COLOR = "#F97316"     # --agent-claude
 FALLBACK_COLOR = "#9AA0A6"        # unknown/new profile: placeholder until Susi assigns one
 
 
-def _agent_state(info: dict, claims: dict, activity: dict) -> tuple[str, str, dict | None]:
+def _agent_state(info: dict, claims: dict, activity: dict,
+                 leases: dict | None = None, now_ts: float | None = None) -> tuple[str, str, dict | None]:
     name, gw = info["name"], info["status"]
     if gw == "unknown":
         return "unknown", "gateway status unknown: " + (info["detail"] or "no detail"), None
@@ -70,6 +75,14 @@ def _agent_state(info: dict, claims: dict, activity: dict) -> tuple[str, str, di
         t = review[0]
         return ("reviewing", f"kanban task {t['id']} is in Review, assigned to {name}{more(review)} "
                 "(in Review column; not necessarily being reviewed right now)", t)
+    live = (leases or {}).get("live_count") or 0
+    sess = activity["session"]
+    last = sess.get("last_activity_at") if sess else None
+    if live > 0 and now_ts is not None and isinstance(last, (int, float)):
+        age_s = now_ts - last
+        if -60 <= age_s < SESSION_ACTIVE_MIN * 60:  # -60: tolerate small clock/rounding skew
+            return ("working", f"{live} live session lease(s) and last activity {max(0, int(age_s // 60))} min ago "
+                    f"(< {SESSION_ACTIVE_MIN} min); no kanban task claimed", None)
     return ("idle", f"gateway running; no Running/Review task assigned to {name} "
             f"among {claims['total']} kanban task(s)", None)
 
@@ -81,19 +94,20 @@ def office_state() -> dict:
     for i, name in enumerate(list_profiles()):
         info = agent_info(name)
         act = state.latest_activity(name)
-        st, reason, task = _agent_state(info, claims, act)
+        lz = session_leases(name)
+        st, reason, task = _agent_state(info, claims, act, lz, now.timestamp())
         sess = act["session"]
         desk = i if i < DESK_COUNT else None
         active_ago = None
         if st == "idle" and sess and isinstance(sess["last_activity_at"], (int, float)):
             mins = int((now.timestamp() - sess["last_activity_at"]) // 60)
             active_ago = mins if 0 <= mins < ACTIVE_WINDOW_MIN else None
-        lz = session_leases(name)
         agents.append({
             "name": name,
             "display_name": info["display_name"],
             "state": st,
             "state_reason": reason,
+            "state_source": "kanban" if task else ("session" if st == "working" else None),
             "current_task": task["title"] if task else None,
             "current_task_id": task["id"] if task else None,
             "last_activity": sess["last_activity_description"] if sess else None,

@@ -38,9 +38,29 @@ CASES = [
     ("nothing claimed -> idle", info("running"), claims(), OK_ACT, "idle", None),
 ]
 
+NOW = 1_000_000.0
+LEASE = {"available": True, "live_count": 1, "total": 1, "error": None}
+NO_LEASE = {"available": True, "live_count": 0, "total": 0, "error": None}
+
+
+def act_ago(seconds):
+    return {"available": True, "error": None, "session": {"last_activity_at": NOW - seconds}}
+
+
+# (label, info, claims, activity, leases, want_state, want_title)
+SESSION_CASES = [
+    ("lease + fresh activity -> working (session)", info("running"), claims(), act_ago(60), LEASE, "working", None),
+    ("lease + stale activity -> idle", info("running"), claims(), act_ago(11 * 60), LEASE, "idle", None),
+    ("fresh activity, no lease -> idle", info("running"), claims(), act_ago(60), NO_LEASE, "idle", None),
+    ("kanban Running beats session -> working (task)", info("running"), claims(task(5, "running")),
+     act_ago(60), LEASE, "working", "T5"),
+    ("stopped beats lease -> offline", info("stopped"), claims(), act_ago(60), LEASE, "offline", None),
+]
+CASES = [(*c[:4], None, *c[4:]) for c in CASES] + SESSION_CASES
+
 failed = 0
-for label, i, c, a, want_state, want_title in CASES:
-    st, reason, t = _agent_state(i, c, a)
+for label, i, c, a, lz, want_state, want_title in CASES:
+    st, reason, t = _agent_state(i, c, a, lz, NOW) if lz is not None else _agent_state(i, c, a)
     title = t["title"] if t else None
     ok = st == want_state and title == want_title and isinstance(reason, str) and reason
     failed += not ok

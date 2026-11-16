@@ -67,7 +67,7 @@ interface Health { status: "ok" }
 Auth: yes. No params.
 Sources: `<profile>/gateway.lock` + `/proc` (gateway), `~/.hermes/kanban.db: tasks` (Running/Review
 claims), `<profile>/state.db: sessions` (last activity), `<profile>/runtime/active_sessions.json`
-(leases, info only), `/proc/*/cmdline` (Claude Code CLI). Composed server-side in `api/sources/office.py`.
+(leases), `/proc/*/cmdline` (Claude Code CLI). Composed server-side in `api/sources/office.py`.
 
 **State rules** (first match wins; `state_reason` always says which rule fired):
 
@@ -76,10 +76,14 @@ claims), `<profile>/state.db: sessions` (last activity), `<profile>/runtime/acti
 3. `working`: a kanban task assigned to this profile is in **Running**
 4. `reviewing`: a kanban task assigned to this profile is in **Review** (task is in the Review
    column; that doesn't prove anyone is reviewing it now)
-5. `idle`: gateway running, nothing claimed
+5. `working`: no kanban claim, but `session_leases.live_count > 0` **and** the profile's
+   `state.db` `last_activity_at` is less than 10 minutes ago (`state_source: "session"`).
+   Both are required: a CLI left open holds a lease forever, and a just-ended session has fresh
+   activity with nobody working.
+6. `idle`: everything else
 
-Session leases and recency never change the state. `working` comes only from a real kanban claim.
-With the board empty today, all 4 agents show `idle`, and that is correct.
+`state_source` says where a `working`/`reviewing` state came from: `"kanban"` (rules 3/4),
+`"session"` (rule 5), else `null`. The state value set is unchanged (no new `active` value).
 
 ```ts
 interface OfficeState {
@@ -103,13 +107,14 @@ interface OfficeAgent {
   display_name: string;                        // profile.yaml description, else name
   state: AgentState;
   state_reason: string;                        // one line, human-readable; use as the status tooltip
+  state_source: "kanban" | "session" | null;   // which rule produced working/reviewing; null otherwise
   current_task: string | null;                 // kanban title when working/reviewing
   current_task_id: string | null;
   last_activity: string | null;                // state.db sessions.last_activity_description ("" -> null)
   last_activity_at: ISODate | null;            // from the most recently active session
   active_ago_min: number | null;               // only for idle agents active < 15 min ago
   gateway: GatewayStatus;
-  session_leases: {                            // open chat sessions (info only)
+  session_leases: {                            // open chat sessions (feed rule 5)
     available: boolean; live_count: number | null; total: number | null; error: string | null;
   };
   desk_index: number | null;                   // 0..3 = fixed seat by profile order; null if > 4 profiles

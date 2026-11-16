@@ -30,6 +30,7 @@ export interface OfficeAgent {
   display_name: string;
   state: OfficeState;
   state_reason: string;
+  state_source?: "kanban" | "session" | null;
   current_task: { id: string | number; title?: string | null; status?: string; [k: string]: unknown } | null;
   current_task_id: string | number | null;
   last_activity: string | null;
