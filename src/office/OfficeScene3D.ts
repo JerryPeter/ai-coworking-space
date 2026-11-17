@@ -689,13 +689,36 @@ export class OfficeScene3D {
     const light = new THREE.PointLight(LAMP.light, LAMP.dayI * Math.PI, LAMP.dist, LAMP.decay); light.position.y = 1.36; g.add(light);
     this.lampBulbs.push(bulb); this.lampLights.push(light);
   }
+  /** Toilet room (shared by both floors): x 7.6..12, z 2.27..6.0; door gap in the x7.5 partition at z 3.2..4.3.
+   *  North wall: sink + mirror, bin. South wall (west→east): shower, bathtub, WC. */
   private toilet(F: THREE.Group) {
-    this.box(F, 4.4, 0.02, 3.7, 9.8, 0.003, 4.1, C.tile);
+    this.box(F, 4.5, 0.02, 3.8, 9.75, 0.003, 4.1, C.tile);
     this.part(F, 7.5, 2.2, 12, 2.2, 1.7); this.part(F, 7.5, 2.2, 7.5, 3.2, 1.7); this.part(F, 7.5, 4.3, 7.5, 6, 1.7);
-    this.box(F, 0.42, 0.38, 0.55, 11.25, 0, 4.9, C.white); this.box(F, 0.5, 0.06, 0.6, 11.25, 0.38, 4.9, 0xe4e4de); this.box(F, 0.5, 0.55, 0.2, 11.25, 0.3, 5.3, C.white);
+    // WC: tank back against the south wall (tank z 5.75..5.95)
+    this.box(F, 0.42, 0.38, 0.55, 11.25, 0, 5.45, C.white); this.box(F, 0.5, 0.06, 0.6, 11.25, 0.38, 5.45, 0xe4e4de); this.box(F, 0.5, 0.55, 0.2, 11.25, 0.3, 5.85, C.white);
     this.box(F, 0.16, 0.7, 0.16, 9.3, 0, 2.5, C.white); this.box(F, 0.7, 0.14, 0.46, 9.3, 0.7, 2.5, C.white); this.box(F, 0.5, 0.03, 0.3, 9.3, 0.82, 2.5, 0xbfd9e2);
     this.box(F, 0.6, 0.55, 0.03, 9.3, 1.05, 2.29, 0xbfe3ef);
     this.box(F, 0.3, 0.4, 0.3, 11.5, 0, 2.6, 0x8f9aa3);
+    this.shower(F, 8.12, 5.4);
+    this.bathtub(F, 9.85, 5.58);
+  }
+  /** Corner shower stall, open/glass side facing -z (north). (x, z) = tray centre. */
+  private shower(F: THREE.Group, x: number, z: number) {
+    const g = this.grp(F, x, z, 0), wall = 0xc5d8dc;
+    this.box(g, 1.1, 0.08, 1.1, 0, 0, 0, 0xdde8ea);
+    this.box(g, 1.1, 1.6, 0.05, 0, 0.08, 0.525, wall);                       // back (south)
+    this.box(g, 0.05, 1.6, 1.1, -0.525, 0.08, 0, wall); this.box(g, 0.05, 1.6, 1.1, 0.525, 0.08, 0, wall); // sides
+    this.box(g, 0.8, 1.6, 0.03, -0.12, 0.08, -0.535, 0x9fd6ee, { transparent: true, opacity: 0.3 }); // glass door
+    this.cyl(g, 0.03, 0.03, 0.9, 0, 1.0, 0.46, 0x2c2f36, 8);                // pole
+    this.cyl(g, 0.08, 0.08, 0.06, 0, 1.9, 0.38, 0x9aaab4, 12);              // head
+  }
+  /** Bathtub, long axis along x, back against the south wall. (x, z) = shell centre. */
+  private bathtub(F: THREE.Group, x: number, z: number) {
+    const g = this.grp(F, x, z, 0), metal = 0x9aaab4;
+    [[-0.7, -0.3], [0.7, -0.3], [-0.7, 0.3], [0.7, 0.3]].forEach((p) => this.cyl(g, 0.05, 0.05, 0.08, p[0], 0, p[1], metal, 8));
+    this.box(g, 1.6, 0.5, 0.75, 0, 0.08, 0, 0xeae4dc);
+    this.box(g, 1.4, 0.35, 0.55, 0, 0.18, 0, 0xd4eef5);                      // water (top 0.05 below rim)
+    this.box(g, 0.08, 0.2, 0.08, -0.72, 0.58, 0.25, metal);                   // faucet, west end
   }
   private stool(F: THREE.Group, x: number, z: number) {
     this.cyl(F, 0.2, 0.2, 0.05, x, 0.57, z, C.woodDark, 10); this.cyl(F, 0.03, 0.03, 0.57, x, 0, z, C.metal, 6); this.cyl(F, 0.18, 0.2, 0.03, x, 0, z, C.metal, 10);
@@ -843,7 +866,9 @@ export class OfficeScene3D {
 
     /* toilet */
     this.toilet(F); this.roomLabel(F, "Toilet", 9.8, 4.2, 2.2);
-    this.node(1, "WCo", 6.7, 3.75); this.link(1, "hubE", "WCo");
+    this.node(1, "WCo", 6.7, 3.75); this.node(1, "WCi", 8.6, 3.75); this.link(1, "hubE", "WCo", "WCi");
+    this.spot(1, "Toilet", "break", 9.3, 3.5, N, "stand", "WCi", { pri: 2 });   // at the sink
+    this.spot(1, "Toilet", "break", 8.1, 4.4, S, "stand", "WCi", { pri: 3 });   // by the shower
 
     /* tangga */
     const steps = 12, run = 0.33, rise = 3.2 / steps;
@@ -961,7 +986,10 @@ export class OfficeScene3D {
     this.spot(2, "Balkon", "idle", -7.9, 8.4, S, "lean", "BalOut"); this.spot(2, "Balkon", "idle", -4.2, 8.4, S, "lean", "BalOut"); this.spot(2, "Balkon", "idle", -10.0, 7.4, S, "sit", "BalOut");
     this.roomLabel(F, "Balkon", -6.3, 7.6, 2.0);
 
+    /* toilet */
     this.toilet(F); this.roomLabel(F, "Toilet", 9.8, 4.2, 2.2);
+    this.node(2, "WCo2", 6.7, 3.75); this.node(2, "WCi2", 8.6, 3.75); this.link(2, "h2c", "WCo2", "WCi2");
+    this.spot(2, "Toilet", "break", 9.3, 3.5, N, "stand", "WCi2", { pri: 2 });  // at the sink
 
     /* corner lamps */
     this.floorLamp(F, -11.75, -3.0); // Kamar Tidur (bunks fill the back wall)
