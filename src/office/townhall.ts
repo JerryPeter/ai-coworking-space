@@ -1344,17 +1344,19 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       return o;
     };
     const BusTJ = (variant: "blue" | "orange", wl: THREE.Mesh[]) => {
-      // TransJakarta electric bus: blue = white body + blue roof/stripe/front; orange = full orange + darker skirt
+      // TransJakarta livery (t_1fd4427f): both variants have a WHITE body; accent (blue / orange) on the
+      // lower skirt, a belt stripe under the windows, roof and front face.
       const o = G(); const L = 9.2, W = 2.4;
       const blue = variant === "blue";
-      const bodyColor = blue ? "#f5f5f5" : "#E8520A";
-      const accentColor = blue ? "#0066CC" : "#C44308";
-      const roofColor = blue ? "#0066CC" : "#E8520A";
-      const frontColor = blue ? "#0066CC" : "#E8520A";
+      const bodyColor = "#f5f5f5";
+      const accentColor = blue ? "#1f4e9c" : "#f07c1b";
+      const roofColor = accentColor;
+      const frontColor = accentColor;
       const darkColor = "#1a2a3a";
       bx(o, W, 2.55, L, bodyColor, 0, 0.4, 0);                                   // main body (0.4..2.95)
       bx(o, W, 0.35, L, roofColor, 0, 2.95, 0);                                  // roof (2.95..3.3)
-      bx(o, W + 0.02, 0.5, L + 0.02, accentColor, 0, 0.55, 0, false);            // stripe / skirt
+      bx(o, W + 0.02, 0.6, L + 0.02, accentColor, 0, 0.4, 0, false);             // lower skirt (0.4..1.0)
+      bx(o, W + 0.02, 0.14, L + 0.02, accentColor, 0, 1.3, 0, false);            // belt stripe under the windows
       for (const sx of [-1, 1]) bx(o, 0.04, 0.9, L - 0.5, darkColor, sx * (W / 2 + 0.01), 1.6, 0.1, false); // window strip
       bx(o, W + 0.02, 2.9, 0.04, frontColor, 0, 0.4, -L / 2 - 0.01, false);      // front face (0.4..3.3)
       bx(o, W - 0.4, 1.0, 0.04, darkColor, 0, 1.8, -L / 2 - 0.03, false);        // windshield
