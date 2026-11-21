@@ -9,6 +9,7 @@
 //     waiting → Lantai 1 Lobby                                   offline → dimmed at own desk    unknown → own desk with "?"
 //   Agents walk there along a waypoint graph per floor and take the stairs between floors.
 // - Claude Code CLI = the clay/glass WebGL shader orb, floating in the far south-west corner of the Lantai 2 agent work area.
+// - OpenCode = a terminal/server appliance beside Claude Code, also on Lantai 2.
 // - Right-hand agent roster + detail panel (DOM, Hermes "H" / OpenClaw "OC" badges, toggle button).
 // - Corner floor lamps that light up at night (setTimeOfDay → TownHall.setNight).
 //
@@ -44,6 +45,11 @@ function officeLabel(name: string, role: string): string {
   const firstName = name.trim().split(/\s+/)[0] || name;
   const shortRole = role.trim().toLowerCase();
   return shortRole ? `${firstName}, ${shortRole}` : firstName;
+}
+
+/** Safety cap for agent name labels: max 25 chars, ellipsis when truncated. */
+function capLabel(name: string): string {
+  return name.length > 25 ? name.slice(0, 24) + "…" : name;
 }
 
 export const CLAUDE_AGENT_ID = "claude_cli";
@@ -100,6 +106,8 @@ interface Agent3D {
   dimmed?: boolean;
   /** Claude Code CLI is a tool, not a person: rendered as a floating energy orb instead of a body. */
   orb?: Orb;
+  /** OpenCode is an engine, not a person: rendered as a small terminal/server appliance. */
+  terminal?: Terminal;
 }
 /** One orbiting ember (units: orb radii, like the reference's R-relative maths). */
 interface Ember { a: number; rad: number; spd: number; dy: number; vy: number; size: number; max: number; life: number; fl: number }
@@ -109,9 +117,16 @@ interface Tendril { a0: number; span: number; r0: number; shrink: number; speed:
 interface OrbLayer { geo: THREE.BufferGeometry; pos: Float32Array; col: Float32Array; size: Float32Array; back: THREE.Points; front: THREE.Points }
 interface Orb {
   state: ToolStatus; float: THREE.Group; plane: THREE.Mesh; mat: THREE.ShaderMaterial; fallback: THREE.MeshBasicMaterial | null;
+  /** Amber Claude mascot, replacing the former glass orb silhouette. */
+  mascot: THREE.Mesh<THREE.OctahedronGeometry, THREE.MeshStandardMaterial>;
   glow: THREE.Sprite; fx: THREE.Group; embers: Ember[]; tendrils: Tendril[]; emberLayer: OrbLayer; smokeLayer: OrbLayer;
   fxMats: THREE.ShaderMaterial[]; textures: THREE.Texture[]; light: THREE.PointLight;
   pulse: number; spin: number; time: number; tagClock: number;
+}
+interface Terminal {
+  screen: THREE.MeshLambertMaterial;
+  led: THREE.MeshBasicMaterial;
+  time: number;
 }
 /** Claude CLI orb: floats in the empty south-west corner of the Lantai 2 "Area Kerja Agen" (floor-plan px 540, 950),
     clear of the agent pods (x 760-1200), the west wall (x 445) and the library wall (y 1070). */
@@ -297,17 +312,20 @@ function readSidebarOpen() {
   try { return localStorage.getItem(SIDEBAR_KEY) !== "false"; } catch { return true; }
 }
 const hex6 = (n: number) => "#" + n.toString(16).padStart(6, "0");
-/** Roster icon for Claude CLI: a glowing orb (radial gradient, bright centre fading to transparent). */
-function drawOrbFace(state: ToolStatus): string {
+/** Roster icon for Claude CLI: an amber diamond/hexagon mascot. */
+function drawClaudeMascotFace(state: ToolStatus): string {
   const c = document.createElement("canvas"); c.width = c.height = 64;
   const g = c.getContext("2d");
   if (!g) return "";
   g.fillStyle = "#1c1f26"; g.fillRect(0, 0, 64, 64);
-  const col = state === "working" ? CLAUDE_COLOR : state === "idle" ? "#8B6914" : "#5A5A5A";
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 30);
-  grad.addColorStop(0, state === "working" ? "#FFE2BF" : col); grad.addColorStop(0.3, col); grad.addColorStop(1, "rgba(0,0,0,0)");
+  const col = state === "working" ? "#F59E0B" : state === "idle" ? "#8B6914" : "#5A5A5A";
   g.globalAlpha = state === "working" ? 1 : 0.7;
-  g.fillStyle = grad; g.beginPath(); g.arc(32, 32, 30, 0, Math.PI * 2); g.fill();
+  g.shadowColor = state === "working" ? "#F59E0B" : "transparent"; g.shadowBlur = state === "working" ? 10 : 0;
+  g.fillStyle = col; g.beginPath();
+  g.moveTo(32, 5); g.lineTo(57, 20); g.lineTo(51, 48); g.lineTo(32, 59); g.lineTo(13, 48); g.lineTo(7, 20); g.closePath(); g.fill();
+  g.shadowBlur = 0; g.strokeStyle = "#FFE7A3"; g.lineWidth = 2; g.stroke();
+  g.fillStyle = state === "working" ? "#FFF7D6" : "#E8C46B"; g.beginPath(); g.moveTo(32, 14); g.lineTo(45, 23); g.lineTo(41, 41); g.lineTo(32, 47); g.lineTo(23, 41); g.lineTo(19, 23); g.closePath(); g.fill();
+  g.fillStyle = col; g.beginPath(); g.arc(26, 29, 2.5, 0, Math.PI * 2); g.arc(38, 29, 2.5, 0, Math.PI * 2); g.fill();
   return c.toDataURL();
 }
 /** 8x8 Minecraft-style head (hair, skin, eyes, shirt strip). */
@@ -679,7 +697,7 @@ export class OfficeScene3D {
   // ================================================================== agents
   private drawTag(a: Agent3D, pulse?: number) {
     const t = a.tag, col = STATUS[a.data.status].color;
-    const label = officeLabel(a.data.name, a.data.role);
+    const label = capLabel(officeLabel(a.data.name, a.data.role));
     if (t.name.textContent !== label) t.name.textContent = label;
     t.el.title = a.data.name + " · " + STATUS[a.data.status].label;
     t.el.classList.toggle("sel", a === this.selected);
@@ -741,9 +759,19 @@ export class OfficeScene3D {
     });
     const plane = new THREE.Mesh(this.geo("orbPlane", () => new THREE.PlaneGeometry(1, 1)), mat);
     plane.scale.setScalar(ORB_R * 2); plane.renderOrder = 2; float.add(plane);
+    // The tool is represented by Claude's angular amber mascot, not a glass sphere.
+    // Keep the old shader as an invisible fallback path so existing WebGL error
+    // handling remains safe on devices that cannot compile the particle shaders.
+    plane.visible = false;
+    const mascotMat = new THREE.MeshStandardMaterial({
+      color: 0xF59E0B, emissive: 0xB45309, emissiveIntensity: 0.45,
+      roughness: 0.28, metalness: 0.08,
+    });
+    const mascot = new THREE.Mesh(this.geo("claudeMascot", () => new THREE.OctahedronGeometry(ORB_R * 1.05, 1)), mascotMat);
+    mascot.rotation.z = Math.PI / 4; mascot.rotation.x = 0.12; mascot.renderOrder = 2; float.add(mascot);
 
     // Back glow ("pendaran"): reference gradient from 0.85 R to 2.1 R.
-    const glowTex = gradientTexture(128, [[0, "rgba(217,119,87,1)"], [0.45, "rgba(160,72,45,0.37)"], [1, "rgba(110,45,25,0)"]], 0.85 / 2.1);
+    const glowTex = gradientTexture(128, [[0, "rgba(255,214,94,1)"], [0.45, "rgba(245,158,11,0.37)"], [1, "rgba(180,83,9,0)"]], 0.85 / 2.1);
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, opacity: 0.3 }));
     glow.scale.setScalar(ORB_R * 2 * 2.1); glow.renderOrder = 1; float.add(glow);
 
@@ -791,7 +819,7 @@ export class OfficeScene3D {
       book: hit, hit, ring, tag, zzz: stub, dots: stub, excl: stub,
       spot: null, path: [], floor: 1, lastNode: "hubW", pose: "stand", atSpot: false, deskIdx, since: null, phase: 0,
       orb: {
-        state: "unknown", float, plane, mat, fallback: null, glow, fx, embers, tendrils, emberLayer, smokeLayer,
+        state: "unknown", float, plane, mat, fallback: null, mascot, glow, fx, embers, tendrils, emberLayer, smokeLayer,
         fxMats, textures: [emberTex, smokeTex], light, pulse: 0, spin: 0, time: 0, tagClock: 0,
       },
     };
@@ -842,6 +870,10 @@ export class OfficeScene3D {
 
     if (!this.reduce && o.state !== "unknown") o.float.position.y = ORB_Y + (working ? Math.sin(T * 2.4) * 0.14 : Math.sin(T * 1.25) * 0.05);
     o.plane.scale.setScalar(ORB_R * 2 * (1 + 0.012 * Math.sin(T * 1.25) + P * 0.035));
+    o.mascot.rotation.y += d * (working ? 1.15 : 0.35);
+    o.mascot.rotation.z = Math.PI / 4 + Math.sin(T * 0.8) * 0.035;
+    o.mascot.scale.setScalar(1 + P * 0.08);
+    o.mascot.material.emissiveIntensity = (working ? 0.7 : 0.3) + P * 0.65;
     // Billboard: cancel the parents' rotation, then take the camera's.
     o.float.getWorldQuaternion(this.tmpQ).invert();
     o.plane.quaternion.copy(this.tmpQ).multiply(this.camera.quaternion);
@@ -925,7 +957,7 @@ export class OfficeScene3D {
     a.shirt.dispose(); a.lightMat.dispose(); (a.ring.material as THREE.Material).dispose();
     if (a.orb) {
       const o = a.orb; // glow sprite material/map are disposed by the sprite traversal above
-      [o.mat, ...o.fxMats, ...(o.fallback ? [o.fallback] : [])].forEach((m) => m.dispose());
+      [o.mat, o.mascot.material, ...o.fxMats, ...(o.fallback ? [o.fallback] : [])].forEach((m) => m.dispose());
       o.textures.forEach((t) => t.dispose()); o.emberLayer.geo.dispose(); o.smokeLayer.geo.dispose(); o.light.dispose();
     }
     this.agents = this.agents.filter((x) => x !== a); this.byId.delete(a.data.id);
@@ -1109,7 +1141,7 @@ export class OfficeScene3D {
     const skin = hex6(SKINS[a.deskIdx % SKINS.length]), hair = hex6(HAIRS[(a.deskIdx * 5 + 2) % HAIRS.length]);
     const key = orb ? "orb:" + orb : skin + hair + a.data.color;
     let url = this.faces.get(key);
-    if (url === undefined) { url = orb ? drawOrbFace(orb) : drawFace(skin, hair, a.data.color); this.faces.set(key, url); }
+    if (url === undefined) { url = orb ? drawClaudeMascotFace(orb) : drawFace(skin, hair, a.data.color); this.faces.set(key, url); }
     return url;
   }
   private renderRoster() {
@@ -1131,13 +1163,13 @@ export class OfficeScene3D {
       if (a === this.selected) b.setAttribute("aria-current", "true");
       const av = el("span", "o3d-avatar"), face = el("img"); face.src = this.faceIcon(a); face.alt = ""; face.draggable = false;
       av.style.background = a.orb ? "#1c1f26" : a.data.color; av.appendChild(face);
-      if (a.orb) b.classList.add("o3d-orb", "o3d-orb-" + a.orb.state);
+      if (a.orb) b.classList.add("o3d-mascot", "o3d-mascot-" + a.orb.state);
       if (a.data.status === "offline") b.classList.add("o3d-off");
       const st = el("i"); st.style.background = STATUS[a.data.status].color; av.appendChild(st);
       const oc = a.data.id.startsWith("openclaw:");
       const fw = el("span", "o3d-fw " + (oc ? "badge-openclaw" : "badge-hermes"), oc ? "OC" : "H");
       fw.title = oc ? "OpenClaw agent" : "Hermes agent";
-      const nm = el("span", "o3d-name"); nm.append(fw, el("span", "truncate", a.data.name));
+      const nm = el("span", "o3d-name"); nm.append(fw, el("span", "truncate", capLabel(a.data.name)));
       const who = el("span", "o3d-who"); who.appendChild(nm);
       const sm = el("small", "", STATUS[a.data.status].label); sm.style.color = STATUS[a.data.status].color; who.appendChild(sm);
       b.append(av, who, el("span", "o3d-where", this.locText(a)));
