@@ -1,10 +1,10 @@
-// 3D Office: realistic two-floor office (port of the "AI Office 3D" HTML reference), lazy-loaded
+// 3D Office: the "Town Hall AI Agent" 3-floor building (port of the Town Hall HTML reference), lazy-loaded
 // so only this view pays for Three.js. REAL data only, no simulation:
 // - /api/office/state every 5 s → Hermes agents + Claude Code CLI
 // - /api/openclaw/agents every 15 s → OpenClaw team (chief / researcher / writer / reviewer)
 // The scene owns its own roster + detail panel (right side); clicking a Hermes agent or Claude CLI
 // also opens the AgentDrawer via ?agent=<id>. OpenClaw agents have no drawer yet.
-import { Moon, Sun, Tag } from "lucide-react";
+import { House, Minus, Moon, Plus, RotateCw, SlidersHorizontal, Sun, Tag } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { endpoints, useApi } from "../api/client";
 import type { OfficeAgent, OfficeState, OpenClawAgent, ToolState } from "../api/types";
@@ -14,14 +14,18 @@ import { officeBadge, toolBadge } from "../lib/derive";
 import { setParams, useRoute } from "../lib/router";
 import { relative, useNow } from "../lib/time";
 import { CLAUDE_AGENT_ID, OfficeScene3D, STATUS, webglAvailable, type AgentStatus, type Preset } from "../office/OfficeScene3D";
-import { readTod, store, TOD_KEY, type TimeOfDay } from "../office/palettes";
+import { MODE_KEY, readMode, readTod, readVisual, store, TOD_KEY, VISUAL_KEY, type TimeOfDay, type VisualPrefs } from "../office/palettes";
 import { identity, rosterIndex } from "../theme/agents";
 
-const PRESETS: { p: Preset; label: string; title: string }[] = [
-  { p: "workspace", label: "Lantai 1", title: "Lantai 1: Ruang Kerja, Meeting, Tamu, Island Hangout (Lantai 2 disembunyikan)" },
-  { p: "lounge", label: "Lantai 2", title: "Lantai 2: Kamar Tidur, Sofa Baca, Ruang Game, Tempat Istirahat, Balkon" },
-  { p: "overview", label: "Semua", title: "Kedua lantai" },
+const FLOORS: { p: Preset; label: string; title: string }[] = [
+  { p: 1, label: "Lantai 1", title: "Lantai 1: Ruang Kerja (bekerja / offline), Ruang Meeting (review), Lobby" },
+  { p: 2, label: "Lantai 2", title: "Lantai 2: Perpustakaan & Lounge, Coffee Corner (idle)" },
+  { p: 3, label: "Lantai 3", title: "Lantai 3: Ruang Game, Tempat Istirahat (istirahat), Balkon" },
+  { p: 4, label: "Atap", title: "Atap: panel surya & taman atap" },
+  { p: "all", label: "Semua", title: "Seluruh gedung" },
+  { p: "x", label: "Pisah lantai", title: "Pisahkan lantai secara vertikal" },
 ];
+const STYLES = [{ v: 1, label: "Style 1" }, { v: 2, label: "Style 2" }, { v: 3, label: "Style 3" }] as const;
 
 // OpenClaw team: the Agents view cards have no per-agent colour, so these are picked from the
 // reference's SHIRTS palette, chosen to stay distinct from the Hermes + Claude colours.
@@ -47,8 +51,9 @@ function openclawStatus(a: OpenClawAgent, now: number): AgentStatus {
   return !isNaN(t) && now - t < OPENCLAW_RECENT_MS ? "break" : "idle";
 }
 const ZONE: Record<AgentStatus, string> = {
-  working: "Lantai 1 · Ruang Kerja", meeting: "Lantai 1 · Ruang Meeting", waiting: "Lantai 1 · Ruang Tamu",
-  idle: "Area santai (Lantai 1/2)", break: "Lantai 2 · Ruang Game / Tempat Istirahat", offline: "Lantai 2 · Kamar Tidur", error: "Lantai 1 · Ruang Kerja",
+  working: "Lantai 1 · Ruang Kerja", meeting: "Lantai 1 · Ruang Meeting Utama", waiting: "Lantai 1 · Lobby",
+  idle: "Lantai 2 · Perpustakaan & Lounge / Coffee Corner", break: "Lantai 3 · Ruang Game / Tempat Istirahat",
+  offline: "Lantai 1 · Ruang Kerja (meja sendiri, redup)", error: "Lantai 1 · Ruang Kerja (status tidak diketahui)",
 };
 const toolStatus = (s: ToolState | undefined): AgentStatus => (s === "working" ? "working" : s === "idle" ? "idle" : "offline");
 const hermesTask = (a: OfficeAgent) => a.current_task?.title || a.last_activity || null;
@@ -63,12 +68,17 @@ export default function Office() {
   const scene = useRef<OfficeScene3D | null>(null);
   const [ready, setReady] = useState(false);
   const [gl] = useState(webglAvailable);
-  const [preset, setPreset] = useState<Preset>("overview");
+  const [preset, setPresetState] = useState<Preset>(readMode);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [tod, setTod] = useState<TimeOfDay>(readTod);
-  const [labels, setLabels] = useState(true);
-  const ui = useRef({ tod, preset, labels });
-  ui.current = { tod, preset, labels };
+  const [visual, setVisualState] = useState<VisualPrefs>(readVisual);
+  const [rotate, setRotate] = useState(false);
+  const [popOpen, setPopOpen] = useState(false);
+  const popRef = useRef<HTMLDivElement>(null);
+  const popBtn = useRef<HTMLButtonElement>(null);
+  const ui = useRef({ tod, preset, visual });
+  ui.current = { tod, preset, visual };
+  const setPreset = (p: Preset) => { setPresetState(p); store(MODE_KEY, String(p)); };
   const focusParam = params.get("focus");
   const sceneOk = gl && !sceneError;
 
@@ -82,7 +92,7 @@ export default function Office() {
         // OpenClaw agents have no drawer yet; the in-scene detail panel still shows them.
         onSelect: (id) => { if (!id.startsWith("openclaw:")) setParams({ agent: id, tab: null }); },
         onFirstFrame: () => setReady(true),
-        onPresetChange: setPreset,
+        onPresetChange: (p) => { setPresetState(p); store(MODE_KEY, String(p)); },
         reducedMotion,
       });
     } catch (e) {
@@ -90,11 +100,35 @@ export default function Office() {
       return;
     }
     scene.current = s;
+    const v = ui.current.visual;
+    s.setStyle(v.style); s.setWeather(v.weather); s.setScope(v.scope); s.setClouds(v.clouds);
+    s.setLowWalls(v.low); s.setWoodFloor(v.wood); s.setVendors(v.vendors); s.setLabels(v.labels);
     s.setTimeOfDay(ui.current.tod, { instant: true });
-    s.setLabels(ui.current.labels);
-    if (ui.current.preset !== "overview") s.preset(ui.current.preset);
+    if (ui.current.preset !== "all") s.preset(ui.current.preset, { instant: true });
     return () => { s.dispose(); scene.current = null; setReady(false); };
   }, [sceneOk]);
+
+  /** Update one visual setting: React state, localStorage and the live scene. */
+  const setVisual = <K extends keyof VisualPrefs>(k: K, val: VisualPrefs[K]) => {
+    const next = { ...ui.current.visual, [k]: val };
+    setVisualState(next); store(VISUAL_KEY, JSON.stringify(next));
+    const s = scene.current; if (!s) return;
+    if (k === "style") s.setStyle(next.style); else if (k === "weather") s.setWeather(next.weather); else if (k === "scope") s.setScope(next.scope);
+    else if (k === "clouds") s.setClouds(next.clouds); else if (k === "low") s.setLowWalls(next.low); else if (k === "wood") s.setWoodFloor(next.wood);
+    else if (k === "vendors") s.setVendors(next.vendors); else if (k === "labels") s.setLabels(next.labels);
+  };
+
+  // Close the visual-settings popup on any click outside it (reference behaviour) or on Escape.
+  useEffect(() => {
+    if (!popOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!popRef.current?.contains(t) && !popBtn.current?.contains(t)) setPopOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPopOpen(false); };
+    document.addEventListener("pointerdown", onDown); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [popOpen]);
 
   const chooseTod = (next: TimeOfDay) => {
     if (next === tod) return;
@@ -182,32 +216,68 @@ export default function Office() {
 
   const errors = [office.error && `Office: ${office.error.message}`, oc.error && `OpenClaw: ${oc.error.message}`].filter(Boolean);
   return (
-    <div className="office">
+    <div className="office" data-style={visual.style}>
       <div className="office-frame">
         <div ref={host} className={`office-canvas${ready ? " ready" : ""}`} />
-        <div className="ov ov-tl">
+        <div className="ov ov-tl th-bar" role="toolbar" aria-label="Kontrol tampilan">
+          <select className="th-sel" aria-label="Pilih gaya tampilan" title="Gaya tampilan" value={visual.style}
+            onChange={(e) => setVisual("style", Number(e.target.value) as VisualPrefs["style"])}>
+            {STYLES.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+          </select>
+          <span className="ov-sep" aria-hidden="true" />
           <div className="segmented" role="radiogroup" aria-label="Time of day">
-            <button className="icon tod-day" role="radio" aria-checked={tod === "day"} aria-pressed={tod === "day"} aria-label="Day" title="Siang"
+            <button className="icon tod-day" role="radio" aria-checked={tod === "day"} aria-pressed={tod === "day"} aria-label="Day" title="Mode siang"
               onClick={() => chooseTod("day")}><Sun size={16} /></button>
-            <button className="icon tod-night" role="radio" aria-checked={tod === "night"} aria-pressed={tod === "night"} aria-label="Night" title="Malam"
+            <button className="icon tod-night" role="radio" aria-checked={tod === "night"} aria-pressed={tod === "night"} aria-label="Night" title="Mode malam"
               onClick={() => chooseTod("night")}><Moon size={16} /></button>
           </div>
           <span className="ov-sep" aria-hidden="true" />
           <div className="segmented" role="group" aria-label="Pilih lantai">
-            {PRESETS.map(({ p, label, title }) => (
-              <button key={p} aria-pressed={preset === p} title={title} onClick={() => { setPreset(p); scene.current?.preset(p); }}>{label}</button>
+            {FLOORS.map(({ p, label, title }) => (
+              <button key={String(p)} aria-pressed={preset === p} title={title} onClick={() => { setPreset(p); scene.current?.preset(p); }}>{label}</button>
             ))}
           </div>
           <span className="ov-sep" aria-hidden="true" />
           <div className="segmented">
-            <button className="icon" aria-pressed={labels} aria-label="Label ruang" title="Label ruang"
-              onClick={() => { setLabels(!labels); scene.current?.setLabels(!labels); }}><Tag size={16} /></button>
+            <button ref={popBtn} className="icon" aria-pressed={popOpen} aria-expanded={popOpen} aria-controls="th-visual-pop" aria-label="Pengaturan visual" title="Pengaturan visual"
+              onClick={() => setPopOpen(!popOpen)}><SlidersHorizontal size={16} /></button>
+            <button className="icon" aria-pressed={visual.labels} aria-label="Label ruang" title="Tampilkan/sembunyikan label ruang"
+              onClick={() => setVisual("labels", !visual.labels)}><Tag size={16} /></button>
+            <button className="icon" aria-pressed={rotate} aria-label="Putar otomatis" title="Putar otomatis"
+              onClick={() => { setRotate(!rotate); scene.current?.setAutoRotate(!rotate); }}><RotateCw size={16} /></button>
+            <button className="icon" aria-label="Reset kamera" title="Kembali ke sudut awal"
+              onClick={() => scene.current?.resetCamera()}><House size={16} /></button>
           </div>
         </div>
-        <div className="ov ov-bl">Seret untuk memutar · gulir untuk zoom · klik kanan untuk menggeser · klik agent untuk detail</div>
-        <div className="ov ov-br tabular">
-          {office.updatedAt ? `State updated ${relative(office.updatedAt, now)} · every 5s` : "Loading state…"}
-          {errors.map((e) => <div key={e} className="xs" style={{ color: "var(--outcome-failed)" }}>{e}</div>)}
+        {popOpen && (
+          <div ref={popRef} id="th-visual-pop" className="ov th-pop" role="dialog" aria-label="Pengaturan visual">
+            <p className="th-pop-t">Tampilan</p>
+            <label className="th-chk"><input type="radio" name="th-scope" checked={visual.scope === "all"} onChange={() => setVisual("scope", "all")} /> Tampilkan semua ornamen</label>
+            <label className="th-chk"><input type="radio" name="th-scope" checked={visual.scope === "building"} onChange={() => setVisual("scope", "building")} /> Hanya gedung kantor</label>
+            <div className="th-pop-sep" />
+            <p className="th-pop-t">Cuaca</p>
+            {([["clear", "Cerah"], ["rain", "Hujan"], ["snow", "Salju"]] as const).map(([w, l]) => (
+              <label key={w} className="th-chk"><input type="radio" name="th-weather" checked={visual.weather === w} onChange={() => setVisual("weather", w)} /> {l}</label>
+            ))}
+            <div className="th-pop-sep" />
+            <p className="th-pop-t">Lainnya</p>
+            <label className="th-chk"><input type="checkbox" checked={visual.clouds} onChange={(e) => setVisual("clouds", e.target.checked)} /> Tampilkan awan</label>
+            <label className="th-chk"><input type="checkbox" checked={visual.low} onChange={(e) => setVisual("low", e.target.checked)} /> Tembok rendah</label>
+            <label className="th-chk"><input type="checkbox" checked={visual.wood} onChange={(e) => setVisual("wood", e.target.checked)} /> Lantai kayu</label>
+            <label className="th-chk"><input type="checkbox" checked={visual.vendors} onChange={(e) => setVisual("vendors", e.target.checked)} /> Tampilkan pedagang kaki lima</label>
+          </div>
+        )}
+        <div className="ov ov-bl th-brand">
+          <b>TOWN HALL</b>
+          <span title="Seret untuk memutar · gulir untuk zoom · klik kanan untuk menggeser · klik agent untuk detail">Kantor virtual 3D · klik agent untuk detail</span>
+          <span className="tabular th-state">
+            {office.updatedAt ? `State updated ${relative(office.updatedAt, now)} · every 5s` : "Loading state…"}
+          </span>
+          {errors.map((e) => <span key={e} className="xs" style={{ color: "var(--outcome-failed)" }}>{e}</span>)}
+        </div>
+        <div className="th-zoom">
+          <button className="ov" aria-label="Perbesar" title="Perbesar" onClick={() => scene.current?.zoom(0.75)}><Plus size={18} /></button>
+          <button className="ov" aria-label="Perkecil" title="Perkecil" onClick={() => scene.current?.zoom(1.33)}><Minus size={18} /></button>
         </div>
       </div>
     </div>

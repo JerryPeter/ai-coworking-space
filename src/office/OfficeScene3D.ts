@@ -1,29 +1,33 @@
-// Realistic two-floor 3D office, ported from the standalone "AI Office 3D" HTML reference
-// (three@0.128 + global OrbitControls) to three@0.187 + ES modules, wrapped in one class.
+// 3D Office: the "Town Hall AI Agent" multi-floor building (src/office/townhall.ts, ported from the
+// standalone HTML reference) with Mission Control's real agents living inside it.
 //
-// Port notes (r128 -> r187):
-// - OrbitControls comes from three/examples/jsm.
-// - PCFSoftShadowMap was removed in r18x; PCFShadowMap + shadow.radius is used instead.
-// - THREE.Clock is deprecated; frame timing uses performance.now().
-// - Lights are physical since r155: the reference's legacy intensities are multiplied by PI, and
-//   colour management is switched off while this scene lives (restored on dispose), so hex colours,
-//   canvas textures and lighting render like the r128 reference. Nothing else in the app uses three.
-// - The reference's random "simulation" is NOT ported: agents only change when Office.tsx pushes
-//   real /api/office/state + /api/openclaw/agents data in through setAgentState()/setRobotState().
+// What this class owns (the integration layer, unchanged in behaviour):
+// - Agents only change when Office.tsx pushes real /api/office/state + /api/openclaw/agents data in through
+//   setAgentState()/setRobotState(). No simulation. State → room:
+//     working → own desk in Lantai 1 "Ruang Kerja" (typing)      reviewing (meeting) → Lantai 1 Ruang Meeting Utama
+//     idle    → Lantai 2 Perpustakaan & Lounge / Coffee Corner   break (OpenClaw recent run) → Lantai 3 Ruang Game / Tempat Istirahat
+//     waiting → Lantai 1 Lobby                                   offline → dimmed at own desk    unknown → own desk with "?"
+//   Agents walk there along a waypoint graph per floor and take the stairs between floors.
+// - Claude Code CLI = the clay/glass WebGL shader orb, floating in the Lantai 1 lobby by the entrance.
+// - Right-hand agent roster + detail panel (DOM, Hermes "H" / OpenClaw "OC" badges, toggle button).
+// - Corner floor lamps that light up at night (setTimeOfDay → TownHall.setNight).
+//
+// Port notes (r128 -> r187): OrbitControls/CSS2DRenderer from three/examples/jsm; PCFSoftShadowMap is gone, so
+// PCFShadowMap + shadow.radius; colour management is switched off while this scene lives (restored on dispose)
+// and light intensities are multiplied by PI, so the reference's hex colours and lighting render like r128.
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-
-export type Preset = "overview" | "workspace" | "lounge";
+import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
+import { createTownHall, FT, LH, S as PXS, wx, wz, type FloorMode, type Scope, type StyleNo, type TownHall, type Weather } from "./townhall";
 import type { TimeOfDay } from "./palettes";
-export type { TimeOfDay };
+
+export type { TimeOfDay, FloorMode, Scope, StyleNo, Weather };
+/** Floor selector value: 1-3 = one floor, 4 = roof, "all" = whole building, "x" = floors split vertically. */
+export type Preset = FloorMode;
 export type AgentStatus = "working" | "meeting" | "waiting" | "idle" | "break" | "offline" | "error";
 export type ToolStatus = "working" | "idle" | "unknown";
-type Mode = "f1" | "f2" | "all";
 type Pose = "stand" | "sit" | "type" | "read" | "game" | "lie" | "lean" | "play" | "walk";
-type FloorNo = 1 | 2;
-
-const PRESET_MODE: Record<Preset, Mode> = { overview: "all", workspace: "f1", lounge: "f2" };
-const MODE_PRESET: Record<Mode, Preset> = { all: "overview", f1: "workspace", f2: "lounge" };
+type FloorNo = 1 | 2 | 3;
 
 export const STATUS: Record<AgentStatus, { label: string; color: string; use: string }> = {
   working: { label: "Bekerja", color: "#2fbf71", use: "desk" },
@@ -31,8 +35,8 @@ export const STATUS: Record<AgentStatus, { label: string; color: string; use: st
   waiting: { label: "Menunggu input", color: "#f2a91e", use: "waiting" },
   idle: { label: "Idle", color: "#9aa6b1", use: "idle" },
   break: { label: "Istirahat", color: "#b06cf0", use: "break" },
-  offline: { label: "Offline", color: "#7b8794", use: "sleep" },
-  error: { label: "Error", color: "#ef4b4b", use: "desk" },
+  offline: { label: "Offline", color: "#7b8794", use: "desk" },
+  error: { label: "Tidak diketahui", color: "#ef4b4b", use: "desk" },
 };
 
 export const CLAUDE_AGENT_ID = "claude_cli";
@@ -42,7 +46,7 @@ const CLAUDE_COLOR = "#F97316";
 export interface AgentMeta {
   role?: string | null;
   color?: string;
-  /** Preferred desk index (0..9). Falls back to the first free desk. */
+  /** Preferred desk index (0..12). Falls back to the first free desk. */
   desk?: number;
   /** ISO timestamp of the agent's last real activity, shown as "Aktivitas". */
   lastActive?: string | null;
@@ -53,7 +57,7 @@ export interface AgentMeta {
 export interface SceneOptions {
   onSelect?: (id: string) => void;
   onFirstFrame?: () => void;
-  /** Fired when the scene changes floor by itself (selecting an agent on a hidden floor). */
+  /** Fired when the scene changes floor by itself (selecting an agent on another floor, reset camera). */
   onPresetChange?: (p: Preset) => void;
   reducedMotion?: boolean;
 }
@@ -69,23 +73,24 @@ export function webglAvailable(): boolean {
 
 // ------------------------------------------------------------------ world data types
 type Col = number | string | THREE.Material;
-type Animator = (dt: number, t: number) => void;
 interface GNode { id: string; x: number; z: number; adj: string[] }
 interface Spot {
   id: string; floor: FloorNo; room: string; use: string[]; x: number; z: number; rot: number; pose: Pose;
   node: string; y: number; pri: number; by: Agent3D | null;
 }
-interface Wall { tall: THREE.Group; low: THREE.Group; nx: number; nz: number }
 interface Sprite2D { c: HTMLCanvasElement; tex: THREE.CanvasTexture; sp: THREE.Sprite }
+interface Tag { obj: CSS2DObject; el: HTMLElement; dot: HTMLElement; name: HTMLElement }
 interface Waypoint { x: number; z: number; y: number; node?: string; switchTo?: FloorNo; yAfter?: number; spot?: Spot }
 
 interface AgentData { id: string; name: string; role: string; status: AgentStatus; task: string; color: string; lastActive: string | null; reason: string }
 interface Agent3D {
   data: AgentData; group: THREE.Group; body: THREE.Group; lightMat: THREE.MeshBasicMaterial; shirt: THREE.MeshLambertMaterial;
   legL: THREE.Group; legR: THREE.Group; armL: THREE.Group; armR: THREE.Group;
-  book: THREE.Mesh; hit: THREE.Mesh; ring: THREE.Mesh; tag: Sprite2D; zzz: THREE.Sprite; dots: THREE.Sprite; excl: THREE.Sprite;
+  book: THREE.Mesh; hit: THREE.Mesh; ring: THREE.Mesh; tag: Tag; zzz: THREE.Sprite; dots: THREE.Sprite; excl: THREE.Sprite;
   spot: Spot | null; path: Waypoint[]; floor: FloorNo; lastNode: string; pose: Pose; atSpot: boolean;
   deskIdx: number; since: number | null; phase: number;
+  /** Offline agents are drawn with translucent, darkened materials. */
+  dimmed?: boolean;
   /** Claude Code CLI is a tool, not a person: rendered as a floating energy orb instead of a body. */
   orb?: Orb;
 }
@@ -101,9 +106,9 @@ interface Orb {
   fxMats: THREE.ShaderMaterial[]; textures: THREE.Texture[]; light: THREE.PointLight;
   pulse: number; spin: number; time: number; tagClock: number;
 }
-/** Claude CLI orb: floats in the Lantai 1 lobby, between the meeting room's glass wall (x=-5) and the stairs (x~0..4). */
-const ORB_POS = { x: -2.4, z: 3.9 };
-const ORB_Y = 1.6;   // centre height (about a character's shoulder)
+/** Claude CLI orb: floats in the Lantai 1 lobby, just inside the glass entrance (floor-plan px 1050, 1682). */
+const ORB_POS = { x: wx(1050), z: wz(1682) };
+const ORB_Y = 1.6;   // centre height above the floor (about a character's shoulder)
 const ORB_R = 0.5;   // glass sphere radius (1u across, roughly one character)
 const ORB_EMBERS = 80, ORB_TENDRILS = 16, ORB_SEG = 14;
 const TAU = Math.PI * 2;
@@ -247,32 +252,17 @@ function gradientTexture(size: number, stops: [number, string][], inner = 0): TH
   stops.forEach(([o, s]) => gr.addColorStop(o, s)); g.fillStyle = gr; g.fillRect(0, 0, size, size);
   return new THREE.CanvasTexture(c);
 }
-/** Corner floor lamps: off-ish by day, warm glow at night. */
-const LAMP = { bulbDay: 0xd4b85a, bulbNight: 0xfff5c0, light: 0xffd580, dayI: 0.05, nightI: 0.6, dist: 5, decay: 1.5 };
 
-const C = {
-  wall: 0xece4d2, part: 0xe0d7c3, slab: 0xd9cfba, wood: 0xc48a55, woodDark: 0x8a5a34, deskTop: 0xeadcc0, metal: 0x2c2f36,
-  white: 0xf5f4ef, glassSolid: 0x9fd6ee, grass: 0x69ab47, pave: 0xc4bba8, paveEdge: 0xaea592, road: 0x3b3e44, leaf: 0x3f9a45, leaf2: 0x2f8040,
-  trunk: 0x7a5230, sofaBlue: 0x4f6fa8, sofaOrange: 0xe08a4a, sofaGreen: 0x5e9c7a, carpetRed: 0x8e3a34, navy: 0x2f3f7a, tile: 0xdfe7e8,
-  kitchen: 0xe9e3d6, bedCarpet: 0x8394b8, sage: 0xa9b98f, rug: 0x7fa3b5, rugWarm: 0xc8744f, deck: 0xa98d6e, pot: 0xb86a45, pants: 0x2f3644,
-};
+const C = { metal: 0x2c2f36, pants: 0x2f3644 };
 const SKINS = [0xf1c9a5, 0xd9a273, 0xa8754f, 0xf5d6b8, 0x8d5a3b, 0xe3b48c];
 const HAIRS = [0x2b2320, 0x5a3a22, 0x1c1c1c, 0x8a5a34, 0x3a2a22, 0xc98a3c];
 const FONT = 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
 const SPEED = 2.4;
-const N = Math.PI, E = Math.PI / 2, W = -Math.PI / 2, S = 0;
-// Reference light values (r128 legacy units); multiplied by PI for r187 physical lights.
-const THEME = {
-  night: { bg: 0x131b2b, hemi: 0.42, hemiColor: 0xaab9e6, sun: 0.3, sunColor: 0xbfd0ff },
-  day: { bg: 0xbfe6f7, hemi: 0.72, hemiColor: 0xffffff, sun: 0.62, sunColor: 0xfff3dd },
-};
-const VIEWS: Record<Mode, { t: number[]; o: number[] }> = {
-  f1: { t: [0, 0.4, 0.8], o: [8, 22, 27] }, f2: { t: [0, 3.4, 1.6], o: [8, 23, 28] }, all: { t: [0, 5.6, -0.6], o: [11, 27, 39] },
-};
+const D2R = Math.PI / 180;
+const HOME_CAM = new THREE.Vector3(-34, 40, 50), HOME_TGT = new THREE.Vector3(0, 3, 2);
+/** Stairwell (floor-plan px): x centre, bottom step edge, top step edge. Same footprint on Lantai 1 and 2. */
+const STAIR = { x: 1303, bottom: 1240, top: 1068 };
 
-function mulberry32(a: number) {
-  return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-}
 function hashStr(s: string) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
 function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h - r);
@@ -329,31 +319,19 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 
 export class OfficeScene3D {
   private renderer: THREE.WebGLRenderer;
+  private css: CSS2DRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(32, 1, 0.5, 500);
+  private camera = new THREE.PerspectiveCamera(38, 1, 0.1, 600);
   private controls: OrbitControls;
-  private hemi: THREE.HemisphereLight;
-  private sun: THREE.DirectionalLight;
-  private world = new THREE.Group();
-  private F1 = new THREE.Group();
-  private F2 = new THREE.Group();
-  private floors: Record<FloorNo, THREE.Group>;
-  private walls: Wall[] = [];
-  private labels: THREE.Sprite[] = [];
-  private animators: Animator[] = [];
-  private deskScreens: THREE.MeshLambertMaterial[] = [];
-  /** Corner floor lamps (5 per floor), switched by setTimeOfDay(). */
-  private lampLights: THREE.PointLight[] = [];
-  private lampBulbs: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[] = [];
+  private th: TownHall;
   private spots: Spot[] = [];
-  private G: Record<FloorNo, Record<string, GNode>> = { 1: {}, 2: {} };
+  private G: Record<FloorNo, Record<string, GNode>> = { 1: {}, 2: {}, 3: {} };
   private mats = new Map<string, THREE.MeshLambertMaterial>();
   private geos = new Map<string, THREE.BufferGeometry>();
-  private rnd = mulberry32(11);
-  private woodCanvas: HTMLCanvasElement;
-  private GLASS: THREE.MeshLambertMaterial;
+  private dimMats = new Map<THREE.Material, THREE.Material>();
   private HIT = new THREE.MeshBasicMaterial({ visible: false });
   private tmpQ = new THREE.Quaternion();
+  private tmpV = new THREE.Vector3();
 
   private agents: Agent3D[] = [];
   private byId = new Map<string, Agent3D>();
@@ -361,9 +339,7 @@ export class OfficeScene3D {
   /** focus() before the agent's first state push: applied when it is added. */
   private pendingFocus: string | null = null;
   private showLabels = true;
-  private mode: Mode = "all";
-  private f2Target = new THREE.Vector3(0, 11.2, -3);
-  private tween: { ft: THREE.Vector3; fp: THREE.Vector3; tt: THREE.Vector3; tp: THREE.Vector3; k: number } | null = null;
+  private tween: { ft: THREE.Vector3; fp: THREE.Vector3; tt: THREE.Vector3; tp: THREE.Vector3; k: number; dur: number } | null = null;
   private reduce: boolean;
   private tod: TimeOfDay = "day";
   private dirty = true;
@@ -378,7 +354,7 @@ export class OfficeScene3D {
   private prevColorManagement: boolean;
   private opts: SceneOptions;
 
-  // DOM: roster + detail panel (the reference's right-hand panel), owned by the scene.
+  // DOM: roster + detail panel, owned by the scene.
   private ui: { root: HTMLElement; toggle: HTMLButtonElement; title: HTMLElement; tally: HTMLElement; list: HTMLUListElement; detail: HTMLElement; dl: HTMLDListElement; dName: HTMLElement };
   private sidebarOpen = readSidebarOpen();
   /** Roster face icons (data URLs), keyed by everything that changes the drawing. */
@@ -392,41 +368,29 @@ export class OfficeScene3D {
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.domElement.style.touchAction = "none";
     host.appendChild(this.renderer.domElement);
+    this.css = new CSS2DRenderer();
+    this.css.domElement.className = "th-labels";
+    host.appendChild(this.css.domElement);
 
-    this.camera.position.set(12, 30, 40);
+    this.camera.position.copy(HOME_CAM);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.target.copy(HOME_TGT);
     this.controls.enableDamping = true; this.controls.dampingFactor = 0.08;
-    this.controls.maxPolarAngle = Math.PI * 0.47; this.controls.minDistance = 7; this.controls.maxDistance = 150;
+    this.controls.minDistance = 6; this.controls.maxDistance = 150;
+    this.controls.maxPolarAngle = 86 * D2R;
+    this.controls.autoRotateSpeed = 0.6;
     this.controls.addEventListener("start", this.onControlsStart);
 
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0xa9b8a0, 0.72 * Math.PI);
-    this.scene.add(this.hemi);
-    const sun = (this.sun = new THREE.DirectionalLight(0xfff3dd, 0.62 * Math.PI));
-    sun.position.set(-16, 34, 20); sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -32, right: 32, top: 32, bottom: -32, near: 1, far: 110 });
-    sun.shadow.bias = -0.0006; sun.shadow.radius = 2;
-    this.scene.add(sun);
-
-    this.GLASS = this.M(0xa9d8ec, { transparent: true, opacity: 0.35 });
-    this.woodCanvas = this.makeWoodCanvas();
-    this.scene.add(this.world, this.F1, this.F2);
-    this.floors = { 1: this.F1, 2: this.F2 };
-    this.buildF1();
-    this.buildF2();
-    this.buildWorld();
+    this.th = createTownHall(this.scene, this.renderer.capabilities.maxTextureSize >= 4096 ? 4096 : 2048);
+    this.buildGraph();
 
     this.ui = this.buildPanel();
     this.applyTheme();
-    this.F2.position.copy(this.f2Target);
-    const v = this.viewFor("all");
-    this.controls.target.copy(v.t); this.camera.position.copy(v.p);
-    this.setMode("all", true);
 
     const c = this.renderer.domElement;
     c.addEventListener("pointerdown", this.onDown);
@@ -439,9 +403,7 @@ export class OfficeScene3D {
   }
 
   // ================================================================== public interface
-  get activePreset(): Preset { return MODE_PRESET[this.mode]; }
-  /** [floor 1 visible, floor 2 visible]. */
-  get visibleFloors(): [boolean, boolean] { return [true, this.F2.visible]; }
+  get activePreset(): Preset { return this.th.mode; }
   get timeOfDay(): TimeOfDay { return this.tod; }
 
   /** Create or update one agent from real API data. `name` = display name. */
@@ -455,17 +417,26 @@ export class OfficeScene3D {
     d.task = task ?? "";
     if (meta.lastActive !== undefined) d.lastActive = meta.lastActive ?? null;
     if (meta.reason !== undefined) d.reason = meta.reason ?? "";
-    if (meta.color && meta.color !== d.color) { d.color = meta.color; a.shirt.color.set(meta.color); changed = true; }
+    if (meta.color && meta.color !== d.color) {
+      d.color = meta.color;
+      const dim = !!a.dimmed; this.setDim(a, false); a.shirt.color.set(meta.color); this.setDim(a, dim);
+      changed = true;
+    }
     if (STATUS[status] && status !== prev) {
       d.status = status; a.since = Date.now(); a.lightMat.color.set(STATUS[status].color);
-      if (a.orb) { this.applyOrb(a); this.deskGlow(a); } else this.go(a, this.pickSpot(a));
+      if (a.orb) { this.applyOrb(a); this.deskGlow(a); }
+      else {
+        const s = this.pickSpot(a);
+        if (s && s === a.spot && a.atSpot) { this.setPose(a, this.poseFor(a, s)); this.deskGlow(a); } else this.go(a, s);
+        this.setDim(a, status === "offline");
+      }
       changed = true;
     }
     if (changed) this.drawTag(a);
     this.dirty = true;
   }
 
-  /** Claude Code CLI (a tool, not a Hermes profile) as an extra agent with its own desk. */
+  /** Claude Code CLI (a tool, not a Hermes profile) as an extra agent with its own (reserved) desk. */
   setRobotState(state: ToolStatus, label: string) {
     const status: AgentStatus = state === "working" ? "working" : state === "idle" ? "idle" : "offline";
     this.setAgentState(CLAUDE_AGENT_ID, status, "Claude Code CLI", label, { role: "Coding tool", color: CLAUDE_COLOR, desk: 4 });
@@ -478,13 +449,33 @@ export class OfficeScene3D {
   }
   agentIds(): string[] { return this.agents.map((a) => a.data.id); }
 
-  preset(p: Preset) { this.setMode(PRESET_MODE[p] ?? "all"); }
+  /** Floor selector (Lantai 1/2/3, Atap, Semua, Pisah lantai). */
+  preset(p: Preset, opts?: { instant?: boolean }) { this.setMode(p, false, !!opts?.instant); }
   focus(id: string) {
     if (this.byId.has(id)) { this.pendingFocus = null; this.select(id); } else this.pendingFocus = id;
   }
-  setLabels(on: boolean) { this.showLabels = on; this.applyLabels(); }
-
+  setLabels(on: boolean) { this.showLabels = on; }
   setTimeOfDay(tod: TimeOfDay, _opts?: { instant?: boolean }) { this.tod = tod; this.applyTheme(); }
+  setStyle(n: StyleNo) { this.th.applyStyle(n); }
+  setWeather(w: Weather) { this.th.setWeather(w); }
+  setScope(s: Scope) { this.th.setScope(s); }
+  setClouds(on: boolean) { this.th.setClouds(on); }
+  setLowWalls(on: boolean) { this.th.setLow(on); }
+  setWoodFloor(on: boolean) { this.th.setWood(on); }
+  setVendors(on: boolean) { this.th.setVendors(on); }
+  setAutoRotate(on: boolean) { this.controls.autoRotate = on && !this.reduce; }
+  /** Back to the reference's home view (whole building). */
+  resetCamera() {
+    this.th.setMode("all"); this.opts.onPresetChange?.("all");
+    this.flyTo(HOME_TGT.clone(), HOME_CAM.clone(), 0.9);
+  }
+  /** Zoom buttons: f < 1 moves closer. */
+  zoom(f: number) {
+    const base = this.tween ? this.tween.tt : this.controls.target, cam = this.tween ? this.tween.tp : this.camera.position;
+    const off = cam.clone().sub(base);
+    const d = THREE.MathUtils.clamp(off.length() * f, this.controls.minDistance, this.controls.maxDistance);
+    this.flyTo(base.clone(), base.clone().add(off.setLength(d)), 0.35);
+  }
 
   dispose() {
     cancelAnimationFrame(this.raf); this.raf = 0;
@@ -498,21 +489,26 @@ export class OfficeScene3D {
     const kill = (x: { dispose(): void } | null | undefined) => { if (x && !disposed.has(x)) { disposed.add(x); x.dispose(); } };
     this.scene.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh || (o as THREE.Sprite).isSprite) {
-        if (m.isMesh) kill(m.geometry);
+      if (m.isMesh || (o as THREE.Sprite).isSprite || (o as THREE.Points).isPoints || (o as THREE.LineSegments).isLineSegments) {
+        if (!(o as THREE.Sprite).isSprite) kill(m.geometry);
         const mat = m.material as THREE.Material | THREE.Material[];
-        (Array.isArray(mat) ? mat : [mat]).forEach((x) => { kill((x as THREE.MeshBasicMaterial).map); kill(x); });
+        (Array.isArray(mat) ? mat : [mat]).forEach((x) => {
+          const mm = x as THREE.MeshLambertMaterial;
+          kill(mm.map); kill(mm.userData?.map1); kill(mm.userData?.map2); kill(x);
+        });
       }
+      if ((o as THREE.Light).isLight) (o as THREE.Light).dispose();
     });
-    this.geos.forEach(kill); this.mats.forEach(kill); kill(this.HIT);
+    this.geos.forEach(kill); this.mats.forEach(kill); this.dimMats.forEach(kill); kill(this.HIT);
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     c.remove();
+    this.css.domElement.remove();
     this.ui.root.remove(); this.ui.toggle.remove();
     THREE.ColorManagement.enabled = this.prevColorManagement;
   }
 
-  // ================================================================== primitives
+  // ================================================================== primitives (agents only)
   private M(c: number | string, o?: THREE.MeshLambertMaterialParameters): THREE.MeshLambertMaterial {
     const k = String(c) + (o ? JSON.stringify(o) : "");
     let m = this.mats.get(k);
@@ -531,44 +527,6 @@ export class OfficeScene3D {
     const m = new THREE.Mesh(this.geo(`b${w},${h},${d}`, () => new THREE.BoxGeometry(w, h, d)), this.asMat(c, o));
     m.position.set(x, y + h / 2, z); m.castShadow = !m.material.transparent; m.receiveShadow = true; p.add(m); return m;
   }
-  private cyl(p: THREE.Object3D, rt: number, rb: number, h: number, x: number, y: number, z: number, c: Col, seg = 10) {
-    const m = new THREE.Mesh(this.geo(`c${rt},${rb},${h},${seg}`, () => new THREE.CylinderGeometry(rt, rb, h, seg)), this.asMat(c));
-    m.position.set(x, y + h / 2, z); m.castShadow = true; m.receiveShadow = true; p.add(m); return m;
-  }
-  private ico(p: THREE.Object3D, r: number, x: number, y: number, z: number, c: Col) {
-    const m = new THREE.Mesh(this.geo(`i${r}`, () => new THREE.IcosahedronGeometry(r, 0)), this.asMat(c));
-    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; p.add(m); return m;
-  }
-  private plane(p: THREE.Object3D, w: number, d: number, x: number, y: number, z: number, mat: THREE.Material) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
-    m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); m.receiveShadow = true; p.add(m); return m;
-  }
-  private grp(p: THREE.Object3D, x: number, z: number, rot = 0, y = 0) {
-    const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = rot; p.add(g); return g;
-  }
-  private glow(c: number) { return new THREE.MeshBasicMaterial({ color: c }); }
-
-  private makeWoodCanvas() {
-    const c = document.createElement("canvas"); c.width = 256; c.height = 256;
-    const x = c.getContext("2d")!, rnd = this.rnd;
-    const tones = ["#c68d58", "#bd8450", "#cb945f", "#b97f4b", "#c28a54"];
-    for (let r = 0; r < 8; r++) {
-      let px = -Math.floor(rnd() * 90);
-      while (px < 256) {
-        const w = 70 + Math.floor(rnd() * 80);
-        x.fillStyle = tones[Math.floor(rnd() * tones.length)]; x.fillRect(px, r * 32, w, 32);
-        x.fillStyle = "rgba(90,55,25,.35)"; x.fillRect(px + w - 1, r * 32, 1.5, 32); px += w;
-      }
-      x.fillStyle = "rgba(90,55,25,.3)"; x.fillRect(0, r * 32, 256, 1.5);
-    }
-    return c;
-  }
-  /** Canvas-drawn wood grain floor material (reference woodMat()). */
-  private woodMat(rx: number, rz: number) {
-    const t = new THREE.CanvasTexture(this.woodCanvas);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, rz);
-    return new THREE.MeshLambertMaterial({ map: t });
-  }
   private textSprite(w: number, h: number, sx: number, sy: number): Sprite2D {
     const c = document.createElement("canvas"); c.width = w; c.height = h;
     const tex = new THREE.CanvasTexture(c);
@@ -576,174 +534,24 @@ export class OfficeScene3D {
     sp.scale.set(sx, sy, 1); sp.renderOrder = 20;
     return { c, tex, sp };
   }
-  private roomLabel(F: THREE.Group, text: string, x: number, z: number, y = 2.5) {
-    const s = this.textSprite(384, 72, 3.6, 0.675), g = s.c.getContext("2d")!;
-    g.font = "600 30px " + FONT;
-    const tw = g.measureText(text).width + 44;
-    g.fillStyle = "rgba(255,255,255,.8)"; rr(g, (384 - tw) / 2, 10, tw, 52, 26); g.fill();
-    g.fillStyle = "#1d2933"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, 192, 37);
-    s.tex.needsUpdate = true; s.sp.position.set(x, y, z); s.sp.userData.floor = F === this.F1 ? 1 : 2; F.add(s.sp); this.labels.push(s.sp);
+  /** Floating HTML name tag (CSS2D), clickable: selects the agent. */
+  private makeTag(g: THREE.Object3D, y: number): Tag {
+    const el = document.createElement("button"); el.type = "button"; el.className = "lbl agent";
+    const dot = document.createElement("i"), name = document.createElement("span");
+    el.append(dot, name);
+    const obj = new CSS2DObject(el); obj.center.set(0.5, 1); obj.position.set(0, y, 0); g.add(obj);
+    return { obj, el, dot, name };
   }
 
-  // ================================================================== architecture
-  private makeWall(F: THREE.Group, side: "N" | "S" | "W" | "E", H: number, y0: number, gaps: number[][] = []): Wall {
-    const cfg = { N: [0, -6.125, 0, 24.5, 0, -1], S: [0, 6.125, Math.PI, 24.5, 0, 1], W: [-12.125, 0, Math.PI / 2, 12, -1, 0], E: [12.125, 0, -Math.PI / 2, 12, 1, 0] }[side];
-    const tall = this.grp(F, cfg[0], cfg[1], cfg[2]), low = this.grp(F, cfg[0], cfg[1], cfg[2]);
-    const L = cfg[3], cuts = [-L / 2];
-    gaps.forEach((g) => cuts.push(g[0], g[1])); cuts.push(L / 2);
-    for (let i = 0; i < cuts.length; i += 2) {
-      const a = cuts[i], b = cuts[i + 1]; if (b - a < 0.01) continue;
-      this.box(tall, b - a, H - y0, 0.25, (a + b) / 2, y0, 0, C.wall); this.box(low, b - a, 0.5 - y0, 0.25, (a + b) / 2, y0, 0, C.wall);
-    }
-    gaps.forEach((g) => this.box(tall, g[1] - g[0], H - 2.1, 0.25, (g[0] + g[1]) / 2, 2.1, 0, C.wall));
-    const w = { tall, low, nx: cfg[4], nz: cfg[5] }; this.walls.push(w); return w;
-  }
-  private win(wg: THREE.Group, lx: number, y: number, w: number, h: number) {
-    this.box(wg, w + 0.16, h + 0.16, 0.3, lx, y - 0.08, 0, C.white); this.box(wg, w, h, 0.33, lx, y, 0, C.glassSolid); this.box(wg, 0.05, h, 0.35, lx, y, 0, C.white);
-  }
-  private ac(wg: THREE.Group, lx: number) { this.box(wg, 1.0, 0.3, 0.24, lx, 2.4, 0.24, C.white); this.box(wg, 0.8, 0.03, 0.02, lx, 2.44, 0.365, 0xc9c9c4); }
-  private tv(wg: THREE.Group, lx: number, y: number, w: number, h: number) {
-    this.box(wg, w + 0.1, h + 0.1, 0.07, lx, y - 0.05, 0.16, C.metal);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), this.glow(0x58b6e8)); m.position.set(lx, y + h / 2, 0.2); wg.add(m);
-    const b = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.5, h * 0.12), this.glow(0xd9f1ff)); b.position.set(lx - w * 0.15, y + h * 0.7, 0.202); wg.add(b);
-    const b2 = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.7, h * 0.08), this.glow(0x8fd0f2)); b2.position.set(lx - w * 0.05, y + h * 0.45, 0.202); wg.add(b2);
-    const bx = lx - w * 0.05;
-    this.animators.push((_dt, t) => { b2.position.x = bx + Math.sin(t * 0.7 + bx) * w * 0.08; b2.scale.x = 0.7 + Math.sin(t * 1.3 + bx) * 0.3; });
-  }
-  private part(F: THREE.Group, x1: number, z1: number, x2: number, z2: number, h = 1.3, c: Col = C.part) {
-    const hz = Math.abs(x2 - x1) > Math.abs(z2 - z1), len = hz ? Math.abs(x2 - x1) : Math.abs(z2 - z1);
-    return this.box(F, hz ? len : 0.14, h, hz ? 0.14 : len, (x1 + x2) / 2, 0, (z1 + z2) / 2, c);
-  }
-  private glassPart(F: THREE.Group, x1: number, z1: number, x2: number, z2: number) {
-    const hz = Math.abs(x2 - x1) > Math.abs(z2 - z1), len = hz ? Math.abs(x2 - x1) : Math.abs(z2 - z1), cx = (x1 + x2) / 2, cz = (z1 + z2) / 2;
-    this.box(F, hz ? len : 0.12, 0.2, hz ? 0.12 : len, cx, 0, cz, C.metal); this.box(F, hz ? len : 0.05, 1.7, hz ? 0.05 : len, cx, 0.2, cz, this.GLASS);
-    this.box(F, hz ? len : 0.1, 0.07, hz ? 0.1 : len, cx, 1.9, cz, C.metal);
-  }
-  private rail(F: THREE.Group, x1: number, z1: number, x2: number, z2: number, h = 0.95) {
-    const hz = Math.abs(x2 - x1) > Math.abs(z2 - z1), len = hz ? Math.abs(x2 - x1) : Math.abs(z2 - z1), cx = (x1 + x2) / 2, cz = (z1 + z2) / 2;
-    this.box(F, hz ? len : 0.07, 0.06, hz ? 0.07 : len, cx, h, cz, C.metal);
-    const n = Math.max(1, Math.round(len / 1.3));
-    for (let i = 0; i <= n; i++) { const k = i / n; this.box(F, 0.06, h, 0.06, x1 + (x2 - x1) * k, 0, z1 + (z2 - z1) * k, C.metal); }
-    this.box(F, hz ? len : 0.03, h - 0.22, hz ? 0.03 : len, cx, 0.12, cz, this.GLASS);
-  }
-
-  // ================================================================== furniture
-  private desk(F: THREE.Group, x: number, z: number) {
-    const g = this.grp(F, x, z, 0);
-    this.box(g, 1.5, 0.06, 0.75, 0, 0.69, 0, C.deskTop);
-    [[-0.68, -0.3], [0.68, -0.3], [-0.68, 0.3], [0.68, 0.3]].forEach((p) => this.box(g, 0.06, 0.69, 0.06, p[0], 0, p[1], C.metal));
-    this.box(g, 0.26, 0.02, 0.16, 0, 0.75, -0.18, C.metal); this.box(g, 0.05, 0.2, 0.05, 0, 0.77, -0.18, C.metal);
-    this.box(g, 0.74, 0.44, 0.04, 0, 0.9, -0.16, C.metal);
-    const sm = new THREE.MeshLambertMaterial({ color: 0x11161d, emissive: 0x000000 });
-    const s = new THREE.Mesh(new THREE.PlaneGeometry(0.68, 0.38), sm); s.position.set(0, 1.12, -0.137); g.add(s);
-    this.box(g, 0.44, 0.02, 0.14, 0, 0.75, 0.16, 0x3d434d); this.box(g, 0.08, 0.02, 0.11, 0.36, 0.75, 0.16, 0x3d434d);
-    this.deskScreens.push(sm);
-  }
-  private chair(F: THREE.Group, x: number, z: number, rot: number, c: Col = 0x30343c) {
-    const g = this.grp(F, x, z, rot);
-    this.cyl(g, 0.26, 0.26, 0.04, 0, 0, 0, C.metal, 8); this.cyl(g, 0.04, 0.04, 0.34, 0, 0.04, 0, C.metal, 6);
-    this.box(g, 0.46, 0.07, 0.46, 0, 0.36, 0, c); this.box(g, 0.44, 0.5, 0.06, 0, 0.45, -0.26, c);
-  }
-  private sofa(F: THREE.Group, x: number, z: number, rot: number, len: number, c: Col) {
-    const g = this.grp(F, x, z, rot);
-    this.box(g, len, 0.3, 0.86, 0, 0.12, 0, c); this.box(g, len, 0.5, 0.2, 0, 0.3, -0.33, c);
-    this.box(g, 0.16, 0.44, 0.86, -len / 2 + 0.08, 0.16, 0, c); this.box(g, 0.16, 0.44, 0.86, len / 2 - 0.08, 0.16, 0, c);
-    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach((s) => this.box(g, 0.08, 0.12, 0.08, s[0] * (len / 2 - 0.1), 0, s[1] * 0.35, C.metal));
-  }
-  private plant(F: THREE.Group, x: number, z: number, s = 1) {
-    const g = this.grp(F, x, z, this.rnd() * 6); g.scale.setScalar(s);
-    this.cyl(g, 0.22, 0.16, 0.36, 0, 0, 0, C.white, 8); this.ico(g, 0.36, 0, 0.68, 0, C.leaf); this.ico(g, 0.24, 0.14, 0.98, 0.06, C.leaf2);
-  }
-  private tree(P: THREE.Group, x: number, z: number, s = 1, alt = 0) {
-    const g = this.grp(P, x, z, this.rnd() * 6, -0.15); g.scale.setScalar(s);
-    this.cyl(g, 0.18, 0.26, 1.7, 0, 0, 0, C.trunk, 6); this.ico(g, 1.5, 0, 2.7, 0, alt ? C.leaf2 : C.leaf); this.ico(g, 1.0, 0.5, 3.7, 0.25, alt ? C.leaf : C.leaf2);
-  }
-  private coffeeTable(F: THREE.Group, x: number, z: number, w: number, d: number) {
-    this.box(F, w, 0.06, d, x, 0.34, z, C.woodDark);
-    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach((s) => this.box(F, 0.06, 0.34, 0.06, x + s[0] * (w / 2 - 0.08), 0, z + s[1] * (d / 2 - 0.08), C.metal));
-  }
-  private shelf(F: THREE.Group, x: number, z: number, w: number) {
-    const g = this.grp(F, x, z, 0), rnd = this.rnd;
-    this.box(g, w, 1.95, 0.08, 0, 0, -0.14, C.woodDark); this.box(g, 0.07, 1.95, 0.36, -w / 2 + 0.035, 0, 0, C.woodDark); this.box(g, 0.07, 1.95, 0.36, w / 2 - 0.035, 0, 0, C.woodDark);
-    const cols = [0xc9483e, 0x3d6fb4, 0xe2b23c, 0x4f9a6b, 0x8a5cb0, 0xe9e2d2, 0x2f3644, 0xd9773c];
-    for (let r = 0; r < 5; r++) {
-      this.box(g, w - 0.1, 0.05, 0.34, 0, r * 0.47, 0, C.woodDark); if (r === 4) break;
-      let px = -w / 2 + 0.12;
-      while (px < w / 2 - 0.3) {
-        const bw = 0.1 + rnd() * 0.12, bh = 0.24 + rnd() * 0.14;
-        if (rnd() < 0.14) { px += 0.2; continue; }
-        this.box(g, bw - 0.015, bh, 0.24, px + bw / 2, r * 0.47 + 0.05, 0.02, cols[Math.floor(rnd() * cols.length)]); px += bw;
-      }
-    }
-  }
-  /** Standing corner lamp: base, pole, open cone shade, glowing bulb + a point light (night only). */
-  private floorLamp(F: THREE.Group, x: number, z: number) {
-    const g = this.grp(F, x, z, 0);
-    this.box(g, 0.3, 0.08, 0.3, 0, 0, 0, C.metal);
-    this.cyl(g, 0.04, 0.04, 1.6, 0, 0.08, 0, C.metal, 8);
-    const shade = new THREE.Mesh(this.geo("lampShade", () => new THREE.CylinderGeometry(0.06, 0.3, 0.3, 16, 1, true)),
-      this.M(0xe8d5b0, { side: THREE.DoubleSide }));
-    shade.position.y = 1.55; shade.castShadow = true; g.add(shade);
-    const bulb = new THREE.Mesh(this.geo("lampBulb", () => new THREE.SphereGeometry(0.08, 12, 8)), new THREE.MeshBasicMaterial({ color: LAMP.bulbDay }));
-    bulb.position.y = 1.44; g.add(bulb);
-    const light = new THREE.PointLight(LAMP.light, LAMP.dayI * Math.PI, LAMP.dist, LAMP.decay); light.position.y = 1.36; g.add(light);
-    this.lampBulbs.push(bulb); this.lampLights.push(light);
-  }
-  /** Toilet room (shared by both floors): x 7.6..12, z 2.27..6.0; door gap in the x7.5 partition at z 3.2..4.3.
-   *  North wall: sink + mirror, bin. South wall (west→east): shower, bathtub, WC. */
-  private toilet(F: THREE.Group) {
-    this.box(F, 4.5, 0.02, 3.8, 9.75, 0.003, 4.1, C.tile);
-    this.part(F, 7.5, 2.2, 12, 2.2, 1.7); this.part(F, 7.5, 2.2, 7.5, 3.2, 1.7); this.part(F, 7.5, 4.3, 7.5, 6, 1.7);
-    // WC: tank back against the south wall (tank z 5.75..5.95)
-    this.box(F, 0.42, 0.38, 0.55, 11.25, 0, 5.45, C.white); this.box(F, 0.5, 0.06, 0.6, 11.25, 0.38, 5.45, 0xe4e4de); this.box(F, 0.5, 0.55, 0.2, 11.25, 0.3, 5.85, C.white);
-    this.box(F, 0.16, 0.7, 0.16, 9.3, 0, 2.5, C.white); this.box(F, 0.7, 0.14, 0.46, 9.3, 0.7, 2.5, C.white); this.box(F, 0.5, 0.03, 0.3, 9.3, 0.82, 2.5, 0xbfd9e2);
-    this.box(F, 0.6, 0.55, 0.03, 9.3, 1.05, 2.29, 0xbfe3ef);
-    this.box(F, 0.3, 0.4, 0.3, 11.5, 0, 2.6, 0x8f9aa3);
-    this.shower(F, 8.12, 5.4);
-    this.bathtub(F, 9.85, 5.58);
-  }
-  /** Corner shower stall, open/glass side facing -z (north). (x, z) = tray centre. */
-  private shower(F: THREE.Group, x: number, z: number) {
-    const g = this.grp(F, x, z, 0), wall = 0xc5d8dc;
-    this.box(g, 1.1, 0.08, 1.1, 0, 0, 0, 0xdde8ea);
-    this.box(g, 1.1, 1.6, 0.05, 0, 0.08, 0.525, wall);                       // back (south)
-    this.box(g, 0.05, 1.6, 1.1, -0.525, 0.08, 0, wall); this.box(g, 0.05, 1.6, 1.1, 0.525, 0.08, 0, wall); // sides
-    this.box(g, 0.8, 1.6, 0.03, -0.12, 0.08, -0.535, 0x9fd6ee, { transparent: true, opacity: 0.3 }); // glass door
-    this.cyl(g, 0.03, 0.03, 0.9, 0, 1.0, 0.46, 0x2c2f36, 8);                // pole
-    this.cyl(g, 0.08, 0.08, 0.06, 0, 1.9, 0.38, 0x9aaab4, 12);              // head
-  }
-  /** Bathtub, long axis along x, back against the south wall. (x, z) = shell centre. */
-  private bathtub(F: THREE.Group, x: number, z: number) {
-    const g = this.grp(F, x, z, 0), metal = 0x9aaab4;
-    [[-0.7, -0.3], [0.7, -0.3], [-0.7, 0.3], [0.7, 0.3]].forEach((p) => this.cyl(g, 0.05, 0.05, 0.08, p[0], 0, p[1], metal, 8));
-    this.box(g, 1.6, 0.5, 0.75, 0, 0.08, 0, 0xeae4dc);
-    this.box(g, 1.4, 0.35, 0.55, 0, 0.18, 0, 0xd4eef5);                      // water (top 0.05 below rim)
-    this.box(g, 0.08, 0.2, 0.08, -0.72, 0.58, 0.25, metal);                   // faucet, west end
-  }
-  private stool(F: THREE.Group, x: number, z: number) {
-    this.cyl(F, 0.2, 0.2, 0.05, x, 0.57, z, C.woodDark, 10); this.cyl(F, 0.03, 0.03, 0.57, x, 0, z, C.metal, 6); this.cyl(F, 0.18, 0.2, 0.03, x, 0, z, C.metal, 10);
-  }
-  private bunk(F: THREE.Group, x: number, z: number) {
-    const g = this.grp(F, x, z, 0);
-    [[-0.58, -1.08], [0.58, -1.08], [-0.58, 1.08], [0.58, 1.08]].forEach((p) => this.box(g, 0.09, 1.95, 0.09, p[0], 0, p[1], C.woodDark));
-    [0.26, 1.31].forEach((y, i) => {
-      this.box(g, 1.2, 0.12, 2.2, 0, y, 0, C.woodDark); this.box(g, 1.1, 0.14, 2.08, 0, y + 0.12, 0, C.white);
-      this.box(g, 0.7, 0.1, 0.4, 0, y + 0.26, -0.78, 0xe9eef5); this.box(g, 1.12, 0.06, 1.1, 0, y + 0.26, 0.48, i ? 0x5e9c7a : 0x4f6fa8);
-    });
-    this.box(g, 1.2, 0.3, 0.06, 0, 1.6, -1.08, C.woodDark);
-    this.box(g, 0.05, 1.5, 0.05, 0.34, 0, 1.17, C.metal); this.box(g, 0.05, 1.5, 0.05, 0.62, 0, 1.17, C.metal);
-    [0.35, 0.7, 1.05].forEach((y) => this.box(g, 0.3, 0.04, 0.05, 0.48, y, 1.17, C.metal));
-  }
-
-  // ================================================================== path graph + spots
-  private node(f: FloorNo, id: string, x: number, z: number) { this.G[f][id] = { id, x, z, adj: [] }; }
+  // ================================================================== walk graph + spots (floor-plan px → world)
+  private node(f: FloorNo, id: string, px: number, py: number) { this.G[f][id] = { id, x: wx(px), z: wz(py), adj: [] }; }
   private link(f: FloorNo, ...ids: string[]) {
     for (let i = 0; i < ids.length - 1; i++) { const a = this.G[f][ids[i]], b = this.G[f][ids[i + 1]]; a.adj.push(b.id); b.adj.push(a.id); }
   }
-  /** Dijkstra over the floor's walk graph (reference route()). */
+  /** Dijkstra over the floor's walk graph. */
   private route(f: FloorNo, a: string, b: string): GNode[] {
     const g = this.G[f];
-    if (!g[a] || !g[b]) return [];
+    if (!g[a] || !g[b]) return g[b] ? [g[b]] : [];
     const dist: Record<string, number> = {}, prev: Record<string, string | undefined> = {}, open = Object.keys(g);
     open.forEach((k) => { dist[k] = Infinity; }); dist[a] = 0;
     while (open.length) {
@@ -758,342 +566,102 @@ export class OfficeScene3D {
     while (c !== undefined) { out.unshift(g[c]); if (c === a) break; c = prev[c]; }
     return out[0] && out[0].id === a ? out : [g[b]];
   }
-  private spot(floor: FloorNo, room: string, use: string | string[], x: number, z: number, rot: number, pose: Pose, nd: string, o: { y?: number; pri?: number } = {}) {
-    const s: Spot = { id: "s" + this.spots.length, floor, room, use: ([] as string[]).concat(use), x, z, rot, pose, node: nd, y: o.y || 0, pri: o.pri || 0, by: null };
+  /** Spot at floor-plan (px, py). `face` uses the reference convention: rotation (deg) of a -z-facing person
+   *  (0 → faces -z, 180 → +z, -90 → +x, 90 → -x). The agent body faces +z at rot 0, hence the +PI. */
+  private spot(floor: FloorNo, room: string, use: string | string[], px: number, py: number, face: number, pose: Pose, nd: string, o: { y?: number; pri?: number } = {}) {
+    const s: Spot = {
+      id: "s" + this.spots.length, floor, room, use: ([] as string[]).concat(use), x: wx(px), z: wz(py), rot: face * D2R + Math.PI, pose,
+      node: nd, y: FT + (o.y || 0), pri: o.pri || 0, by: null,
+    };
     this.spots.push(s); return s;
   }
-
-  // ================================================================== Lantai 1
-  private buildF1() {
-    const F = this.F1;
-    this.box(F, 24, 0.15, 12, 0, -0.15, 0, C.slab); this.plane(F, 24, 12, 0, 0.002, 0, this.woodMat(8, 4));
-    const wn = this.makeWall(F, "N", 3.0, -0.15), ww = this.makeWall(F, "W", 3.0, -0.15), we = this.makeWall(F, "E", 3.0, -0.15);
-    this.makeWall(F, "S", 3.0, -0.15, [[-6.5, -5]]);
-    this.win(wn.tall, -10, 1.3, 1.9, 1.0); this.win(wn.tall, -6.8, 1.3, 1.9, 1.0); this.win(wn.tall, -3.4, 1.3, 1.5, 1.0); this.ac(wn.tall, -8.4);
-    const ck = this.cyl(wn.tall, 0.22, 0.22, 0.05, -5.05, 2.2, 0.15, C.white, 16); ck.rotation.x = Math.PI / 2;
-    const clk = this.grp(wn.tall, -5.05, 0.19, 0, 2.225), hh = new THREE.Group(), mh = new THREE.Group(); clk.add(hh); clk.add(mh);
-    this.box(hh, 0.03, 0.11, 0.02, 0, 0, 0, C.metal); this.box(mh, 0.02, 0.16, 0.02, 0, 0, 0, C.metal);
-    this.animators.push(() => {
-      const d = new Date();
-      hh.rotation.z = -((d.getHours() % 12) / 12 + d.getMinutes() / 720) * Math.PI * 2;
-      mh.rotation.z = -(d.getMinutes() / 60 + d.getSeconds() / 3600) * Math.PI * 2;
+  /** Floor-plan position of a furniture-local offset (metres) for furniture placed at (px, py) rotated rotDeg. */
+  private off(px: number, py: number, rotDeg: number, lx: number, lz: number): [number, number] {
+    const t = rotDeg * D2R, c = Math.cos(t), s = Math.sin(t);
+    return [px + (lx * c + lz * s) / PXS, py + (-lx * s + lz * c) / PXS];
+  }
+  /** Two seats of a reference Sofa(len) placed at (px, py, rotDeg). */
+  private sofaSeats(floor: FloorNo, room: string, use: string | string[], px: number, py: number, rotDeg: number, len: number, pose: Pose, nd: string | ((i: number) => string), pri = 0) {
+    const k = len / 4;
+    [-k, k].forEach((lx, i) => {
+      const [x, y] = this.off(px, py, rotDeg, lx, -0.05);
+      this.spot(floor, room, use, x, y, rotDeg, pose, typeof nd === "string" ? nd : nd(i), { y: 0.07, pri });
     });
-    this.tv(wn.tall, 2.5, 1.0, 2.2, 1.2); this.win(wn.tall, 0.2, 1.3, 1.1, 1.0); this.win(wn.tall, 4.9, 1.3, 1.1, 1.0); this.ac(wn.tall, 2.5);
-    this.win(wn.tall, 8.3, 1.5, 1.5, 0.9); this.win(wn.tall, 10.2, 1.5, 1.5, 0.9);
-    this.tv(ww.tall, -3.3, 1.0, 2.0, 1.1); this.win(ww.tall, 3.2, 1.3, 1.8, 1.0);
-    this.win(we.tall, -2.6, 1.3, 1.8, 1.0); this.win(we.tall, 4.1, 1.8, 0.9, 0.5);
-
-    /* ruang kerja: 2 rows x 5 desks (reference has 4 per row; widened to 10 so the 4 Hermes agents,
-       Claude Code CLI and the 4 OpenClaw agents each get their own desk, plus one spare). */
-    const cols = [-10.6, -8.75, -6.9, -5.05, -3.2];
-    [-4.0, -1.0].forEach((rz) => cols.forEach((x) => { this.desk(F, x, rz - 0.62); this.chair(F, x, rz, N); }));
-    cols.forEach((x, i) => { this.node(1, "wa" + i, x, -3.1); this.node(1, "wb" + i, x, -0.15); });
-    this.node(1, "wae", -1.9, -3.1); this.node(1, "wbe", -1.9, -0.15);
-    this.link(1, ...cols.map((_, i) => "wa" + i), "wae"); this.link(1, ...cols.map((_, i) => "wb" + i), "wbe"); this.link(1, "wae", "wbe");
-    cols.forEach((x, i) => this.spot(1, "Ruang Kerja", "desk", x, -4.0, N, "type", "wa" + i));
-    cols.forEach((x, i) => this.spot(1, "Ruang Kerja", "desk", x, -1.0, N, "type", "wb" + i));
-    this.plant(F, -11.5, -5.5, 1.05); this.plant(F, -1.6, -5.4, 1.1);
-    this.box(F, 0.5, 0.9, 1.4, -11.75, 0, -2.6, 0xd9d3c4); this.box(F, 0.34, 0.3, 0.34, -11.75, 0.9, -2.9, 0x3d434d);
-    this.roomLabel(F, "Ruang Kerja", -6.8, -5.2, 3.0);
-
-    /* ruang meeting */
-    this.box(F, 6.86, 0.02, 5.36, -8.5, 0.003, 3.25, C.carpetRed);
-    this.part(F, -12, 0.5, -5, 0.5); this.glassPart(F, -5, 0.5, -5, 2.5); this.glassPart(F, -5, 3.7, -5, 6);
-    this.box(F, 3.6, 0.07, 1.3, -8.6, 0.67, 3.3, C.woodDark); this.box(F, 0.5, 0.67, 0.5, -9.8, 0, 3.3, C.metal); this.box(F, 0.5, 0.67, 0.5, -7.4, 0, 3.3, C.metal);
-    this.box(F, 0.3, 0.02, 0.22, -8.2, 0.74, 3.2, 0xf2e36b);
-    [-9.8, -8.6, -7.4].forEach((x) => { this.chair(F, x, 2.2, S); this.chair(F, x, 4.4, N); });
-    this.node(1, "Min", -5.8, 3.1); this.node(1, "Mout", -4.2, 3.1); this.node(1, "Mn", -6.2, 1.35); this.node(1, "MnA", -8.6, 1.35);
-    this.node(1, "Mw", -11.1, 1.35); this.node(1, "Ms", -6.2, 5.3); this.node(1, "MsA", -8.6, 5.3);
-    this.link(1, "Mout", "Min", "Mn", "MnA", "Mw"); this.link(1, "Min", "Ms", "MsA");
-    [-9.8, -8.6, -7.4].forEach((x) => { this.spot(1, "Ruang Meeting", "meeting", x, 2.2, S, "sit", "MnA"); this.spot(1, "Ruang Meeting", "meeting", x, 4.4, N, "sit", "MsA"); });
-    this.spot(1, "Ruang Meeting", "meeting", -11.1, 3.3, E, "stand", "Mw", { pri: 1 }); this.spot(1, "Ruang Meeting", "meeting", -6.0, 4.3, W, "stand", "Min", { pri: 1 });
-    this.plant(F, -5.6, 5.5);
-    this.roomLabel(F, "Ruang Meeting", -8.6, 3.3);
-
-    /* ruang tamu */
-    this.part(F, -1, -6, -1, -1.5);
-    this.box(F, 5.0, 0.02, 3.3, 2.5, 0.003, -3.3, C.rug);
-    this.sofa(F, 2.5, -1.5, N, 2.7, C.sofaBlue); this.sofa(F, 0.0, -4.2, E, 0.95, C.sofaOrange); this.sofa(F, 5.0, -4.2, W, 0.95, C.sofaBlue);
-    this.coffeeTable(F, 2.5, -3.4, 1.2, 0.6); this.box(F, 0.16, 0.14, 0.16, 2.3, 0.4, -3.4, C.white);
-    this.box(F, 2.4, 0.45, 0.42, 2.5, 0, -5.75, C.woodDark); this.plant(F, 5.4, -5.4, 1.1);
-    // fish tank + animated fish
-    this.box(F, 1.5, 0.72, 0.5, 2.5, 0.45, -5.75, this.GLASS); this.box(F, 1.44, 0.08, 0.44, 2.5, 0.46, -5.75, 0xd9c9a0);
-    this.box(F, 1.44, 0.5, 0.44, 2.5, 0.54, -5.75, 0x3fa6d8, { transparent: true, opacity: 0.3 });
-    this.ico(F, 0.1, 2.0, 0.6, -5.75, 0x5e9c7a); this.ico(F, 0.08, 2.95, 0.58, -5.72, 0x5e9c7a);
-    ([[0xe4572e, 0.5, 0], [0xe2a91a, 0.75, 2], [0x3d7fd9, 0.6, 4]] as const).forEach((f) => {
-      const fg = this.grp(F, 2.5, -5.75, 0, 0.8);
-      this.box(fg, 0.14, 0.08, 0.05, 0, -0.04, 0, f[0]); this.box(fg, 0.06, 0.08, 0.03, -0.09, -0.04, 0, f[0]);
-      this.animators.push((_dt, t) => {
-        fg.position.x = 2.5 + Math.sin(t * f[1] + f[2]) * 0.55; fg.position.y = 0.8 + Math.sin(t * f[1] * 2.3 + f[2]) * 0.12;
-        fg.rotation.y = Math.cos(t * f[1] + f[2]) > 0 ? 0 : Math.PI;
-      });
-    });
-    this.node(1, "hubW", -3, 1.3); this.node(1, "hubC", 2, 1.3); this.node(1, "hubE", 6.5, 1.3); this.link(1, "hubW", "hubC", "hubE"); this.link(1, "wbe", "hubW", "Mout");
-    this.node(1, "Tw", 0.4, -0.3); this.node(1, "Tw2", 0.4, -2.6); this.node(1, "Tin", 2.5, -2.6); this.node(1, "Te", 4.5, -2.6); this.link(1, "hubC", "Tw", "Tw2", "Tin", "Te");
-    [1.7, 2.5, 3.3].forEach((x) => this.spot(1, "Ruang Tamu", "waiting", x, -1.56, N, "sit", "Tin"));
-    this.spot(1, "Ruang Tamu", "waiting", 0.06, -4.2, E, "sit", "Tw2"); this.spot(1, "Ruang Tamu", "waiting", 4.94, -4.2, W, "sit", "Te");
-    this.spot(1, "Ruang Tamu", "waiting", 4.7, -0.4, N, "stand", "hubC", { pri: 1 }); this.spot(1, "Ruang Tamu", "waiting", 5.3, -2.6, W, "stand", "Te", { pri: 1 });
-    this.spot(1, "Ruang Tamu", "waiting", -0.3, -2.6, E, "stand", "Tw2", { pri: 1 });
-    this.roomLabel(F, "Ruang Tamu", 2.5, -3.4);
-
-    /* island hangout */
-    this.part(F, 6, -6, 6, -2.5);
-    this.box(F, 5.93, 0.02, 7, 9.035, 0.003, -2.5, C.kitchen);
-    this.box(F, 4.2, 0.86, 0.6, 8.9, 0, -5.7, C.white); this.box(F, 4.3, 0.06, 0.66, 8.9, 0.86, -5.7, C.woodDark);
-    this.box(F, 0.8, 1.8, 0.7, 11.55, 0, -5.6, 0xc9d1d6); this.box(F, 0.04, 0.5, 0.04, 11.22, 0.9, -5.23, C.metal);
-    this.box(F, 0.34, 0.4, 0.3, 7.6, 0.92, -5.7, C.metal);
-    for (let i = 0; i < 3; i++) { // coffee machine steam
-      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
-      const st = new THREE.Mesh(this.geo("i0.05", () => new THREE.IcosahedronGeometry(0.05, 0)), mat); F.add(st);
-      this.animators.push((_dt, t) => {
-        const f = (t * 0.35 + i / 3) % 1;
-        st.position.set(7.6 + Math.sin(t * 2 + i) * 0.05, 1.36 + f * 0.55, -5.7); mat.opacity = 0.55 * (1 - f); st.scale.setScalar(0.7 + f);
-      });
-    }
-    this.box(F, 0.1, 0.12, 0.1, 8.1, 0.92, -5.65, C.white); this.box(F, 0.1, 0.12, 0.1, 8.3, 0.92, -5.75, 0xc9483e);
-    this.box(F, 0.7, 0.04, 0.4, 9.9, 0.92, -5.7, 0xaab4ba);
-    this.box(F, 3.0, 0.88, 1.0, 9, 0, -2.5, 0x4b5d6b); this.box(F, 3.3, 0.07, 1.3, 9, 0.88, -2.5, C.white);
-    this.box(F, 0.3, 0.06, 0.3, 8.4, 0.95, -2.5, 0xe2b23c); this.box(F, 0.12, 0.14, 0.12, 9.6, 0.95, -2.4, C.white);
-    [8, 9, 10].forEach((x) => {
-      this.stool(F, x, -1.5);
-      const lg = this.grp(F, x, -2.5, 0); this.box(lg, 0.02, 0.75, 0.02, 0, 2.25, 0, C.metal); this.cyl(lg, 0.08, 0.26, 0.24, 0, 2.02, 0, 0xe2b23c, 8);
-    });
-    this.node(1, "Is", 9, -0.7); this.node(1, "Iw", 6.9, -0.7); this.node(1, "Iw2", 6.9, -3.7); this.link(1, "hubE", "Is", "Iw", "Iw2"); this.link(1, "hubE", "Iw");
-    [8, 9, 10].forEach((x) => this.spot(1, "Island Hangout", "idle", x, -1.5, N, "sit", "Is", { y: 0.17 }));
-    this.spot(1, "Island Hangout", "idle", 8.3, -3.7, S, "lean", "Iw2", { pri: 1 }); this.spot(1, "Island Hangout", "idle", 9.7, -3.7, S, "lean", "Iw2", { pri: 1 });
-    this.plant(F, 11.4, 0.4, 1.1);
-    this.roomLabel(F, "Island Hangout", 9, -2.6);
-
-    /* toilet */
-    this.toilet(F); this.roomLabel(F, "Toilet", 9.8, 4.2, 2.2);
-    this.node(1, "WCo", 6.7, 3.75); this.node(1, "WCi", 8.6, 3.75); this.link(1, "hubE", "WCo", "WCi");
-    this.spot(1, "Toilet", "break", 9.3, 3.5, N, "stand", "WCi", { pri: 2 });   // at the sink
-    this.spot(1, "Toilet", "break", 8.1, 4.4, S, "stand", "WCi", { pri: 3 });   // by the shower
-
-    /* tangga */
-    const steps = 12, run = 0.33, rise = 3.2 / steps;
-    for (let i = 0; i < steps; i++) this.box(F, run + 0.03, 0.08, 2.0, 4.0 - (i + 0.5) * run, (i + 1) * rise - 0.08, 3.75, C.wood);
-    const ang = -Math.atan2(3.2, 3.96);
-    [2.78, 4.72].forEach((z) => {
-      const s = this.box(F, 5.2, 0.22, 0.08, 2.02, 1.3, z, C.woodDark); s.rotation.z = ang;
-      const h = this.box(F, 5.2, 0.06, 0.06, 2.02, 2.42, z, C.metal); h.rotation.z = ang;
-      for (let k = 0; k < 5; k++) { const px = 3.8 - k * 0.9, py = ((4.0 - px) / 3.96) * 3.2; this.box(F, 0.05, 0.9, 0.05, px, py, z, C.metal); }
-    });
-    this.plant(F, 0.7, 5.35); this.plant(F, 1.6, 5.4, 0.9); this.plant(F, 2.5, 5.35);
-    this.box(F, 1.3, 0.03, 0.7, 5.75, 0.003, 5.4, 0x6b5a48);
-    this.node(1, "S1", 4.8, 3.75); this.link(1, "hubE", "S1", "WCo");
-
-    /* corner lamps (nudged off the plants, partitions and the toilet from the nominal corners) */
-    this.floorLamp(F, -10.85, -5.65); // Ruang Kerja, back-left
-    this.floorLamp(F, 5.7, -3.3);     // Ruang Tamu, right side (back-right corner holds a plant)
-    this.floorLamp(F, -10.5, 5.5);    // front-left
-    this.floorLamp(F, 11.6, -1.3);    // Island Hangout, right side
-    this.floorLamp(F, -11.65, 0.0);   // left side mid, just north of the meeting-room partition
   }
 
-  // ================================================================== Lantai 2
-  private buildF2() {
-    const F = this.F2;
-    [[-12, 0, -6, 6], [4.2, 12, -6, 6], [0, 4.2, -6, 2.6], [0, 4.2, 4.9, 6]].forEach((r) => {
-      const w = r[1] - r[0], d = r[3] - r[2], cx = (r[0] + r[1]) / 2, cz = (r[2] + r[3]) / 2;
-      this.box(F, w, 0.2, d, cx, -0.2, cz, C.slab); this.plane(F, w, d, cx, 0.002, cz, this.woodMat(w / 3, d / 3));
+  private buildGraph() {
+    /* ---------- Lantai 1: work, meeting, lobby ---------- */
+    const n1 = (id: string, x: number, y: number) => this.node(1, id, x, y);
+    n1("lob", 1060, 1600); n1("lobW", 845, 1600);
+    n1("corW1", 790, 1530); n1("corW2", 790, 1300); n1("corW3", 800, 1060); n1("lngS", 830, 990); n1("lng", 780, 900);
+    n1("mtgD", 681, 665); n1("mtgIn", 681, 585); n1("mtgW", 478, 585); n1("mtgE", 880, 585);
+    n1("mtgNW", 478, 352); n1("mtgNM", 700, 352); n1("mtgNE", 880, 352);
+    n1("corE1", 1175, 1590); n1("corE2", 1175, 1280); n1("corE3", 1178, 1110); n1("pan1", 1178, 1030); n1("pan2", 1300, 960);
+    n1("pan3", 1470, 925); n1("rk0", 1600, 900); n1("rkG", 1600, 795);
+    const rows = [745, 675, 600, 525, 450, 375];
+    rows.forEach((y) => n1("rk" + y, 1677, y));
+    n1("m1o", 1640, 892); n1("m1i", 1725, 892); n1("m2o", 1640, 1032); n1("m2i", 1725, 1032);
+    n1("stB", STAIR.x, 1272);
+    this.link(1, "lob", "lobW", "corW1", "corW2", "corW3", "lngS", "lng", "mtgD", "mtgIn");
+    this.link(1, "mtgW", "mtgIn", "mtgE"); this.link(1, "mtgW", "mtgNW", "mtgNM", "mtgNE");
+    this.link(1, "lob", "corE1", "corE2", "corE3", "pan1", "pan2", "pan3", "rk0", "rkG", "rk745", ...rows.slice(1).map((y) => "rk" + y));
+    this.link(1, "rk0", "m1o", "m1i"); this.link(1, "rk0", "m2o", "m2i"); this.link(1, "corE2", "stB");
+
+    // 13 desks, same order as TownHall.deskScreens: west row (0-4), east row (5-10), manager rooms (11-12).
+    [375, 450, 525, 600, 675].forEach((y) => { const [x, z] = this.off(1566, y, 90, 0, 0.62); this.spot(1, "Ruang Kerja", "desk", x, z, 90, "type", "rk" + y, { y: 0.05 }); });
+    [375, 450, 525, 600, 675, 745].forEach((y) => { const [x, z] = this.off(1788, y, -90, 0, 0.62); this.spot(1, "Ruang Kerja", "desk", x, z, -90, "type", "rk" + y, { y: 0.05 }); });
+    [[860, "m1i", "Ruang Manager"], [1000, "m2i", "Ruang Manager 2"]].forEach(([y, nd, room]) => {
+      const [x, z] = this.off(1788, y as number, -90, 0, 0.62); this.spot(1, room as string, "desk", x, z, -90, "type", nd as string, { y: 0.05 });
     });
-    const H = 2.8;
-    const wn = this.makeWall(F, "N", H, -0.2), ww = this.makeWall(F, "W", H, -0.2), we = this.makeWall(F, "E", H, -0.2);
-    this.makeWall(F, "S", H, -0.2, [[5.6, 7]]);
-    this.win(wn.tall, -10.3, 1.2, 1.7, 1.0); this.win(wn.tall, -7.1, 1.2, 1.7, 1.0); this.ac(wn.tall, -8.7); this.ac(wn.tall, -1);
-    this.win(wn.tall, 7.6, 1.3, 1.6, 1.0); this.win(wn.tall, 10.3, 1.3, 1.6, 1.0);
-    this.win(ww.tall, -3.0, 1.1, 2.2, 1.1); this.win(ww.tall, 3.2, 1.2, 1.4, 1.0);
-    this.tv(we.tall, -4.3, 1.0, 1.9, 1.05); this.win(we.tall, -0.9, 1.2, 1.4, 1.0); this.win(we.tall, 4.1, 1.7, 0.9, 0.5);
-
-    /* pembatas bukaan tangga */
-    this.rail(F, 0, 2.6, 4.2, 2.6); this.rail(F, 0, 4.9, 4.2, 4.9); this.rail(F, 4.2, 2.6, 4.2, 4.9);
-    this.node(2, "S2", -0.8, 3.75); this.node(2, "h2a", -4.7, 1.3); this.node(2, "h2b", -0.8, 1.3); this.node(2, "h2c", 5, 1.3);
-    this.link(2, "h2a", "h2b", "h2c"); this.link(2, "S2", "h2b");
-    this.plant(F, -0.5, 5.4, 1.1); this.plant(F, 4.9, 5.4); this.box(F, 1.6, 0.42, 0.5, 6.2, 0, 5.55, C.woodDark);
-    this.box(F, 0.4, 1.0, 0.4, 7.0, 0, 1.9, C.white); this.cyl(F, 0.15, 0.15, 0.34, 7.0, 1.0, 1.9, 0x8fc7e8, 10);
-
-    /* kamar tidur */
-    this.box(F, 6.43, 0.02, 5.93, -8.79, 0.003, -3.04, C.bedCarpet);
-    this.part(F, -12, 0, -5.5, 0, 1.5); this.part(F, -5.5, -6, -5.5, -1.6, 1.5); this.part(F, -5.5, -0.4, -5.5, 0, 1.5);
-    const bx = [-11.1, -9.55, -8.0, -6.45];
-    bx.forEach((x, i) => { this.bunk(F, x, -4.8); this.node(2, "bd" + i, x, -3.0); });
-    this.link(2, "bd0", "bd1", "bd2", "bd3"); this.node(2, "Bin", -6.3, -1.0); this.node(2, "Bout", -4.7, -1.0); this.link(2, "bd3", "Bin", "Bout", "h2a");
-    bx.forEach((x, i) => this.spot(2, "Kamar Tidur", "sleep", x, -4.15, S, "lie", "bd" + i, { y: 0.69 }));
-    bx.forEach((x, i) => this.spot(2, "Kamar Tidur", "sleep", x, -4.15, S, "lie", "bd" + i, { y: 1.74, pri: 1 }));
-    this.box(F, 0.6, 1.9, 1.7, -11.62, 0, -1.2, C.woodDark); this.box(F, 0.03, 1.7, 0.03, -11.3, 0.1, -1.2, C.metal);
-    this.cyl(F, 0.05, 0.14, 0.9, -5.95, 0, -2.3, C.metal, 8); this.cyl(F, 0.12, 0.22, 0.26, -5.95, 0.9, -2.3, 0xf2e3a8, 8);
-    this.roomLabel(F, "Kamar Tidur", -8.8, -3.2, 2.9);
-
-    /* sofa baca */
-    this.box(F, 5.4, 0.02, 3.6, -1.3, 0.003, -3.2, C.rugWarm);
-    this.shelf(F, -3.6, -5.78, 2.4); this.shelf(F, -1.1, -5.78, 2.4); this.shelf(F, 1.4, -5.78, 2.4);
-    this.sofa(F, -4.8, -3.2, E, 2.4, C.sofaGreen); this.sofa(F, 1.9, -2.2, W, 0.95, C.sofaOrange); this.sofa(F, 1.9, -4.2, W, 0.95, C.sofaOrange);
-    this.coffeeTable(F, -1.4, -3.2, 1.4, 0.8); this.box(F, 0.3, 0.05, 0.22, -1.6, 0.4, -3.1, 0xc9483e); this.box(F, 0.28, 0.05, 0.2, -1.57, 0.45, -3.12, 0x3d6fb4);
-    this.cyl(F, 0.03, 0.03, 1.5, -5.05, 0, -4.85, C.metal, 6); this.cyl(F, 0.14, 0.24, 0.3, -5.05, 1.5, -4.85, 0xf2e3a8, 8); this.cyl(F, 0.2, 0.2, 0.04, -5.05, 0, -4.85, C.metal, 8);
-    this.node(2, "R1", -3.3, -1.0); this.node(2, "R2", -3.3, -3.2); this.node(2, "R3", 0.6, -1.0); this.node(2, "R4", 0.6, -3.2);
-    this.link(2, "h2a", "R1", "R2"); this.link(2, "h2b", "R1", "R3", "R4"); this.link(2, "h2b", "R3"); this.link(2, "Bout", "R1");
-    this.spot(2, "Sofa Baca", "idle", -4.74, -3.8, E, "read", "R2"); this.spot(2, "Sofa Baca", "idle", -4.74, -2.6, E, "read", "R2");
-    this.spot(2, "Sofa Baca", "idle", 1.84, -2.2, W, "read", "R4"); this.spot(2, "Sofa Baca", "idle", 1.84, -4.2, W, "read", "R4");
-    this.roomLabel(F, "Sofa Baca", -1.3, -3.3);
-
-    /* ruang game */
-    this.part(F, 3.5, -6, 3.5, -2);
-    this.box(F, 8.43, 0.02, 6.93, 7.79, 0.003, -2.54, C.navy);
-    this.box(F, 2.7, 0.06, 1.5, 8.3, 0.7, -1.2, 0x2d6fb5); this.box(F, 2.7, 0.065, 0.03, 8.3, 0.7, -1.2, C.white); this.box(F, 0.03, 0.16, 1.6, 8.3, 0.76, -1.2, 0xf5f4ef);
-    [[-1.1, -0.55], [1.1, -0.55], [-1.1, 0.55], [1.1, 0.55]].forEach((p) => this.box(F, 0.07, 0.7, 0.07, 8.3 + p[0], 0, -1.2 + p[1], C.metal));
-    ([[4.6, 0xc9483e], [5.6, 0x3d6fb4]] as const).forEach((a) => { // arcade cabinets
-      const g = this.grp(F, a[0], -5.5, 0);
-      this.box(g, 0.75, 1.75, 0.7, 0, 0, 0, a[1]); this.box(g, 0.75, 0.12, 0.3, 0, 0.85, 0.45, C.metal);
-      const mat = this.glow(0x7de0c0), s = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.42), mat); s.position.set(0, 1.3, 0.352); g.add(s);
-      const k = a[0];
-      this.animators.push((_dt, t) => { mat.color.setHSL(0.43 + Math.sin(t * 0.9 + k) * 0.06, 0.7, 0.55 + (Math.sin(t * 11 + k) > 0.8 ? 0.12 : 0)); });
-      this.box(g, 0.75, 0.2, 0.72, 0, 1.6, 0.02, 0xf2e36b);
-    });
-    this.sofa(F, 9.6, -4.3, E, 2.2, C.sofaBlue); this.box(F, 0.42, 0.4, 2.0, 11.72, 0, -4.3, C.woodDark); this.box(F, 0.3, 0.08, 0.4, 11.7, 0.4, -4.0, C.metal);
-    this.ico(F, 0.42, 7.1, 0.42, -5.3, 0xe08a4a); this.ico(F, 0.36, 7.95, 0.36, -5.45, 0x5e9c7a);
-    this.node(2, "G1", 5, -0.3); this.node(2, "G2", 5.2, -3.4); this.node(2, "G4", 8.3, -2.9); this.node(2, "G6", 10.9, -2.9); this.node(2, "G5", 10.9, -4.3);
-    this.link(2, "h2c", "G1", "G2", "G4", "G6", "G5");
-    const ppA = this.spot(2, "Ruang Game", "break", 6.55, -1.2, E, "play", "G1"), ppB = this.spot(2, "Ruang Game", "break", 10.05, -1.2, W, "play", "G6");
-    const ball = this.ico(F, 0.05, 8.3, 1.0, -1.2, 0xf5f4ef); ball.castShadow = false;
-    this.animators.push((_dt, t) => { // ping-pong ball only when both players are at the table
-      const on = !!(ppA.by && ppA.by.atSpot && ppB.by && ppB.by.atSpot);
-      ball.visible = on;
-      if (on) ball.position.set(8.3 + Math.sin(t * 3.2) * 1.25, 0.95 + Math.abs(Math.sin(t * 6.4)) * 0.35, -1.2 + Math.sin(t * 1.1) * 0.3);
-    });
-    this.spot(2, "Ruang Game", "break", 4.6, -4.72, N, "play", "G2"); this.spot(2, "Ruang Game", "break", 5.6, -4.72, N, "play", "G2");
-    this.spot(2, "Ruang Game", "break", 9.66, -4.85, E, "game", "G5"); this.spot(2, "Ruang Game", "break", 9.66, -3.75, E, "game", "G5");
-    this.roomLabel(F, "Ruang Game", 7.9, -2.7);
-
-    /* tempat istirahat */
-    this.box(F, 6.43, 0.02, 5.86, -8.79, 0.003, 3.07, C.sage);
-    const bb1 = this.ico(F, 0.6, -10.6, 0.32, 1.5, 0xe08a4a); bb1.scale.y = 0.62;
-    const bb2 = this.ico(F, 0.6, -8.9, 0.32, 1.3, 0x8a5cb0); bb2.scale.y = 0.62;
-    [-11.0, -9.5].forEach((x) => { this.box(F, 0.9, 0.22, 2.0, x, 0.1, 4.2, C.white); this.box(F, 0.9, 0.1, 2.0, x, 0, 4.2, C.woodDark); this.box(F, 0.7, 0.1, 0.4, x, 0.32, 3.45, 0xe9eef5); });
-    this.coffeeTable(F, -7.9, 4.6, 0.8, 0.8); this.cyl(F, 0.1, 0.08, 0.14, -7.9, 0.4, 4.6, C.white, 8);
-    this.plant(F, -11.4, 0.6, 1.2); this.plant(F, -6.1, 0.6, 1.0);
-    this.node(2, "Rest", -7.2, 2.9); this.node(2, "BalIn", -6.3, 5.3); this.node(2, "BalOut", -6.3, 7.3);
-    this.link(2, "h2a", "Rest", "BalIn", "BalOut"); this.link(2, "h2a", "BalIn");
-    this.spot(2, "Tempat Istirahat", ["idle", "break"], -10.6, 1.5, 0.7, "sit", "Rest", { y: 0.12 }); this.spot(2, "Tempat Istirahat", ["idle", "break"], -8.9, 1.3, 0.4, "sit", "Rest", { y: 0.12 });
-    this.spot(2, "Tempat Istirahat", ["idle", "break"], -11.0, 4.95, S, "lie", "Rest", { y: 0.5 }); this.spot(2, "Tempat Istirahat", ["idle", "break"], -9.5, 4.95, S, "lie", "Rest", { y: 0.5 });
-    this.roomLabel(F, "Tempat Istirahat", -8.8, 3.0);
-
-    /* balkon */
-    this.box(F, 9.5, 0.2, 2.65, -6.25, -0.2, 7.575, C.slab); this.box(F, 9.5, 0.02, 2.65, -6.25, 0, 7.575, C.deck);
-    this.rail(F, -11, 8.85, -1.5, 8.85, 1.0); this.rail(F, -11, 6.3, -11, 8.85, 1.0); this.rail(F, -1.5, 6.3, -1.5, 8.85, 1.0);
-    this.chair(F, -10.0, 7.4, S, 0xf5f4ef); this.cyl(F, 0.3, 0.3, 0.05, -9.1, 0.5, 7.5, C.woodDark, 10); this.cyl(F, 0.04, 0.04, 0.5, -9.1, 0, 7.5, C.metal, 6);
-    this.box(F, 1.6, 0.4, 0.4, -2.6, 0, 7.0, C.white); this.ico(F, 0.3, -3.1, 0.6, 7.0, C.leaf); this.ico(F, 0.34, -2.5, 0.65, 7.0, C.leaf2); this.ico(F, 0.26, -2.0, 0.58, 7.0, C.leaf);
-    this.spot(2, "Balkon", "idle", -7.9, 8.4, S, "lean", "BalOut"); this.spot(2, "Balkon", "idle", -4.2, 8.4, S, "lean", "BalOut"); this.spot(2, "Balkon", "idle", -10.0, 7.4, S, "sit", "BalOut");
-    this.roomLabel(F, "Balkon", -6.3, 7.6, 2.0);
-
-    /* toilet */
-    this.toilet(F); this.roomLabel(F, "Toilet", 9.8, 4.2, 2.2);
-    this.node(2, "WCo2", 6.7, 3.75); this.node(2, "WCi2", 8.6, 3.75); this.link(2, "h2c", "WCo2", "WCi2");
-    this.spot(2, "Toilet", "break", 9.3, 3.5, N, "stand", "WCi2", { pri: 2 });  // at the sink
-
-    /* corner lamps */
-    this.floorLamp(F, -11.75, -3.0); // Kamar Tidur (bunks fill the back wall)
-    this.floorLamp(F, 3.05, -5.6);   // Sofa Baca, back-right past the shelves
-    this.floorLamp(F, 11.0, -5.6);   // Ruang Game
-    this.floorLamp(F, -7.6, 5.6);    // beside the balcony door (not in it)
-    this.floorLamp(F, -11.7, 2.6);   // Tempat Istirahat
-  }
-
-  // ================================================================== outdoor
-  private buildWorld() {
-    const P = this.world;
-    const g = this.box(P, 160, 0.4, 160, 0, -0.55, 0, C.grass); g.castShadow = false;
-    this.box(P, 30, 0.06, 4.6, 0, -0.16, 9.4, C.pave); this.box(P, 30, 0.07, 0.25, 0, -0.16, 11.7, C.paveEdge);
-    this.box(P, 1.8, 0.06, 1.1, 5.75, -0.16, 6.7, C.pave);
-    this.box(P, 3.2, 0.06, 13, -14.6, -0.16, 3.0, C.pave);
-    this.box(P, 160, 0.05, 7, 0, -0.17, 15.4, C.road);
-    for (let x = -40; x <= 40; x += 5) this.box(P, 2.2, 0.01, 0.16, x, -0.115, 15.4, 0xe9e2b4);
-    [[-15, -10, 1.1, 0], [-5, -11, 1, 1], [4, -10.5, 1.15, 0], [12, -11, 1, 1], [-18.5, -3, 1, 1], [-18, 6, 1.1, 0], [16.5, -5, 1.05, 0], [18, 7.5, 1, 1],
-      [-13, 9.6, 0.8, 1], [11, 9.4, 0.85, 0], [-24, -12, 1.3, 0], [24, -10, 1.2, 1]].forEach((t) => this.tree(P, t[0], t[1], t[2], t[3]));
-    [[-7, 10.9], [7, 10.9]].forEach((l) => { // street lamps
-      this.cyl(P, 0.07, 0.09, 3.4, l[0], -0.15, l[1], C.metal, 6); this.box(P, 1.0, 0.06, 0.08, l[0] + 0.45, 3.2, l[1], C.metal);
-      const b = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.08, 0.2), this.glow(0xfff0b8)); b.position.set(l[0] + 0.85, 3.17, l[1]); P.add(b);
-    });
-    { // park bench
-      const b = this.grp(P, 12.5, 8.3, 0);
-      [-0.3, 0, 0.3].forEach((z) => this.box(b, 2.0, 0.06, 0.22, 0, 0.42, z, C.woodDark));
-      [-0.85, 0.85].forEach((x) => this.box(b, 0.06, 0.42, 0.75, x, 0, 0, C.metal));
-      this.box(b, 2.0, 0.4, 0.06, 0, 0.5, -0.42, C.woodDark);
+    // Ruang Meeting Utama: OvalTable(8.4, 1.6, 8) at (732, 467); chairs 1.15 m either side of the long axis.
+    for (let i = 0; i < 8; i++) {
+      const x = 732 + (-3.57 + i * 1.02) / PXS;
+      this.spot(1, "Ruang Meeting Utama", "meeting", x, 467 - 1.15 / PXS, 180, "sit", x < 600 ? "mtgNW" : x < 800 ? "mtgNM" : "mtgNE", { y: 0.05 });
+      this.spot(1, "Ruang Meeting Utama", "meeting", x, 467 + 1.15 / PXS, 0, "sit", x < 600 ? "mtgW" : x < 760 ? "mtgIn" : "mtgE", { y: 0.05 });
     }
-    { // food cart
-      const k = this.grp(P, -17.6, 8.6, 0.35);
-      this.box(k, 1.6, 0.9, 1.0, 0, 0, 0, 0xd2302c); this.box(k, 1.8, 0.08, 1.2, 0, 0.9, 0, C.woodDark);
-      [-0.75, 0.75].forEach((x) => { this.box(k, 0.06, 1.1, 0.06, x, 0.98, -0.5, C.metal); this.box(k, 0.06, 1.1, 0.06, x, 0.98, 0.5, C.metal); });
-      this.box(k, 2.0, 0.12, 1.4, 0, 2.08, 0, 0xd2302c); [-0.7, 0, 0.7].forEach((x) => this.box(k, 0.5, 0.125, 1.42, x, 2.075, 0, 0xffffff));
-      this.box(k, 0.5, 0.3, 0.4, -0.4, 0.98, 0, 0x3d434d); this.cyl(k, 0.1, 0.12, 0.22, 0.4, 0.98, 0.1, 0xaab4ba, 8);
-      [-0.5, 0.5].forEach((x) => { const w = this.cyl(k, 0.24, 0.24, 0.1, x, 0.05, 0.6, 0x1c1c1c, 10); w.rotation.x = Math.PI / 2; });
-    }
-    for (let i = 0; i < 4; i++) { // clouds
-      const c = this.grp(P, -34 + i * 19, -22 + (i % 2) * 16, 0, 17 + i * 1.4);
-      [[0, 0, 0, 2.2], [1.8, 0.3, 0.4, 1.6], [-1.7, 0.2, -0.3, 1.5], [0.6, 0.9, -0.4, 1.3]].forEach((b) => {
-        const m = this.ico(c, b[3], b[0], b[1], b[2], 0xffffff); m.scale.y = 0.55; m.castShadow = false;
-      });
-      this.animators.push((dt) => { c.position.x += (0.5 + i * 0.12) * dt; if (c.position.x > 60) c.position.x = -60; });
-    }
-    { // flock of birds
-      const flock = this.grp(P, 0, 0, 0, 12);
-      for (let i = 0; i < 5; i++) {
-        const b = this.grp(flock, Math.cos(i * 1.3) * 2.4, Math.sin(i * 1.3) * 2.4, 0, (i % 2) * 0.6);
-        this.box(b, 0.5, 0.04, 0.12, -0.25, 0, 0, 0x2c2f36); this.box(b, 0.5, 0.04, 0.12, 0.25, 0, 0, 0x2c2f36);
-      }
-      this.animators.push((_dt, t) => {
-        flock.position.set(Math.cos(t * 0.18) * 24, 13 + Math.sin(t * 0.5) * 0.8, Math.sin(t * 0.18) * 22 - 2); flock.rotation.y = -t * 0.18;
-        flock.children.forEach((b, i) => { const f = Math.sin(t * 9 + i) * 0.55; b.children[0].rotation.z = 0.3 + f; b.children[1].rotation.z = -0.3 - f; });
-      });
-    }
-    const car = (c: number, z: number, dir: number, off: number, v: number) => {
-      const g = this.grp(P, 0, z, dir > 0 ? 0 : Math.PI, -0.1);
-      this.box(g, 2.2, 0.55, 1.1, 0, 0.25, 0, c); this.box(g, 1.2, 0.5, 1.0, -0.1, 0.8, 0, c); this.box(g, 1.1, 0.32, 1.04, -0.1, 0.86, 0, 0x9fd6ee);
-      [[-0.7, -0.56], [0.7, -0.56], [-0.7, 0.56], [0.7, 0.56]].forEach((w) => { const m = this.cyl(g, 0.25, 0.25, 0.16, w[0], 0.1, w[1], 0x1c1c1c, 10); m.rotation.x = Math.PI / 2; });
-      const hl = new THREE.Mesh(this.geo("hl", () => new THREE.BoxGeometry(0.06, 0.14, 0.3)), this.glow(0xfff0b8)); hl.position.set(1.1, 0.55, 0.3); g.add(hl);
-      const hl2 = hl.clone(); hl2.position.z = -0.3; g.add(hl2);
-      this.animators.push((_dt, t) => { g.position.x = dir * (((t * v + off) % 110) - 55); });
-    };
-    car(0xe4572e, 14.0, 1, 0, 6); car(0x3d7fd9, 14.0, 1, 55, 6); car(0xf5f4ef, 16.8, -1, 20, 5);
-    const npc = (z: number, shirt: number, x0: number, dir0: number, extra: "cup" | "bag") => { // pedestrians
-      let dir = dir0;
-      const g = this.grp(P, x0, z, 0), b = new THREE.Group(); g.add(b);
-      const shm = this.M(shirt);
-      this.box(b, 0.44, 0.48, 0.26, 0, 0.45, 0, shm);
-      const sk = dir > 0 ? 0xd9a273 : 0xf1c9a5, hr = dir > 0 ? 0x2b2320 : 0x8a5a34;
-      this.box(b, 0.36, 0.34, 0.34, 0, 0.95, 0, sk); this.box(b, 0.4, 0.12, 0.38, 0, 1.25, 0, hr); this.box(b, 0.4, 0.24, 0.1, 0, 1.03, -0.16, hr);
-      const limb = (x: number, y: number, w: number, h: number, d: number, c: Col) => { const pv = new THREE.Group(); pv.position.set(x, y, 0); b.add(pv); this.box(pv, w, h, d, 0, -h, 0, c); return pv; };
-      const lL = limb(-0.11, 0.45, 0.17, 0.45, 0.19, C.pants), lR = limb(0.11, 0.45, 0.17, 0.45, 0.19, C.pants);
-      const aL = limb(-0.29, 0.91, 0.13, 0.42, 0.15, shm), aR = limb(0.29, 0.91, 0.13, 0.42, 0.15, shm);
-      if (extra === "cup") this.cyl(aR, 0.05, 0.04, 0.12, 0, -0.44, 0.08, 0xf5f4ef, 8);
-      if (extra === "bag") this.box(aL, 0.3, 0.32, 0.1, -0.02, -0.75, 0, 0x8a5a34);
-      const ph = this.rnd() * 6;
-      this.animators.push((dt, t) => {
-        g.position.x += 1.1 * dir * dt; if (g.position.x > 14) dir = -1; if (g.position.x < -14) dir = 1;
-        g.rotation.y = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
-        const sw = Math.sin(t * 8 + ph) * 0.6;
-        lL.rotation.x = sw; lR.rotation.x = -sw; aL.rotation.x = -sw * 0.7; aR.rotation.x = extra === "cup" ? -1.0 : sw * 0.7;
-        b.position.y = Math.abs(Math.sin(t * 8 + ph)) * 0.05;
-      });
-    };
-    npc(10.3, 0x2f9e6f, -6, 1, "cup"); npc(8.6, 0xd9488f, 9, -1, "bag");
-    [[-12.9, 6.9], [-9, 6.9], [1.5, 6.9], [9.5, 6.9], [12.8, -3], [-12.9, -6.9]].forEach((b) => this.ico(P, 0.55, b[0], 0.15, b[1], C.leaf2));
+    // Lobby sofas + two standing spots.
+    this.sofaSeats(1, "Lobby", "waiting", 823, 1700, 0, 1.8, "sit", "lobW");
+    this.sofaSeats(1, "Lobby", "waiting", 915, 1700, 0, 1.8, "sit", "lobW");
+    this.spot(1, "Lobby", "waiting", 780, 1640, -90, "stand", "lobW", { pri: 1 });
+    this.spot(1, "Lobby", "waiting", 965, 1640, 90, "stand", "lob", { pri: 1 });
+
+    /* ---------- Lantai 2: lounge (idle) ---------- */
+    const n2 = (id: string, x: number, y: number) => this.node(2, id, x, y);
+    n2("arr", STAIR.x, 1045); n2("c1", 1225, 1045); n2("c2", 1225, 1290); n2("stB", STAIR.x, 1275);
+    n2("lib0", 1050, 1290); n2("libE", 900, 1150); n2("lib", 700, 1175); n2("libSW", 650, 1305); n2("libS", 840, 1310);
+    n2("cc0", 1000, 1480); n2("cc", 760, 1600);
+    this.link(2, "arr", "c1", "c2", "stB"); this.link(2, "c2", "lib0", "libE", "lib", "libSW", "libS", "lib0"); this.link(2, "lib0", "cc0", "cc");
+    this.sofaSeats(2, "Perpustakaan & Lounge", "idle", 543, 1237, -90, 2.2, "read", "lib");
+    this.sofaSeats(2, "Perpustakaan & Lounge", "idle", 902, 1237, 90, 2.2, "read", "lib");
+    this.sofaSeats(2, "Perpustakaan & Lounge", "idle", 622, 1353, 0, 2.2, "read", "libSW");
+    this.sofaSeats(2, "Perpustakaan & Lounge", "idle", 754, 1353, 0, 2.2, "read", "libS");
+    [560, 620, 680, 740].forEach((x) => this.spot(2, "Coffee Corner", "idle", x, 1662, 180, "sit", "cc", { y: 0.29 }));
+    this.spot(2, "Coffee Corner", "idle", 862.5, 1560, -90, "sit", "cc", { y: 0.05 }); this.spot(2, "Coffee Corner", "idle", 937.5, 1560, 90, "sit", "cc0", { y: 0.05 });
+    this.spot(2, "Coffee Corner", "idle", 1022.5, 1620, -90, "sit", "cc0", { y: 0.05 }); this.spot(2, "Coffee Corner", "idle", 1097.5, 1620, 90, "sit", "cc0", { y: 0.05 });
+    this.spot(2, "Coffee Corner", "idle", 500, 1520, 180, "sit", "cc", { y: 0.05, pri: 1 }); this.spot(2, "Coffee Corner", "idle", 560, 1560, 180, "sit", "cc", { y: 0.05, pri: 1 });
+
+    /* ---------- Lantai 3: game room / rest area (break) ---------- */
+    const n3 = (id: string, x: number, y: number) => this.node(3, id, x, y);
+    n3("arr", STAIR.x, 1045); n3("t1", 1345, 990); n3("t2", 1345, 760); n3("rest", 1200, 700);
+    n3("gD", 1475, 780); n3("g1", 1530, 845); n3("g2", 1715, 880);
+    this.link(3, "arr", "t1", "t2", "rest"); this.link(3, "t2", "gD", "g1", "g2");
+    [[1150, 600], [1235, 560], [1285, 680]].forEach(([x, y]) => this.spot(3, "Tempat Istirahat", "break", x, y, 180, "sit", "rest", { y: 0.05 }));
+    this.spot(3, "Ruang Game", "break", 1488, 960, -90, "play", "g1"); this.spot(3, "Ruang Game", "break", 1672, 960, 90, "play", "g2");
+    this.spot(3, "Ruang Game", "break", 1460, 845, 180, "lean", "g1");
+    this.spot(3, "Ruang Game", "break", 1740, 860, -90, "lean", "g2"); this.spot(3, "Ruang Game", "break", 1740, 915, -90, "lean", "g2");
+    this.spot(3, "Ruang Game", "break", 1700, 1020, 0, "sit", "g2", { y: 0.05 }); this.spot(3, "Ruang Game", "break", 1750, 990, 0, "sit", "g2", { y: 0.05 });
+    this.sofaSeats(3, "Ruang Game", "break", 1450, 1045, 0, 2.0, "sit", "g1", 1);
   }
 
   // ================================================================== agents
   private drawTag(a: Agent3D, pulse?: number) {
-    const g = a.tag.c.getContext("2d")!;
-    g.clearRect(0, 0, 320, 72); g.font = "600 27px " + FONT;
-    const name = a.data.name, tw = Math.min(300, g.measureText(name).width + 62), x = (320 - tw) / 2;
-    g.fillStyle = "rgba(22,28,36,.86)"; rr(g, x, 12, tw, 48, 24); g.fill();
-    if (a === this.selected) { g.strokeStyle = "#ffffff"; g.lineWidth = 3.5; rr(g, x + 2, 14, tw - 4, 44, 22); g.stroke(); }
-    g.fillStyle = STATUS[a.data.status].color;
-    if (pulse !== undefined) { // expanding ring around the dot (working orb)
-      g.globalAlpha = 0.55 * (1 - pulse); g.beginPath(); g.arc(x + 25, 36, 9 + pulse * 8, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
-    }
-    g.beginPath(); g.arc(x + 25, 36, 9, 0, Math.PI * 2); g.fill();
-    g.fillStyle = "#ffffff"; g.textAlign = "left"; g.textBaseline = "middle"; g.fillText(name, x + 42, 38, tw - 56);
-    a.tag.tex.needsUpdate = true;
+    const t = a.tag, col = STATUS[a.data.status].color;
+    if (t.name.textContent !== a.data.name) t.name.textContent = a.data.name;
+    t.el.title = a.data.name + " · " + STATUS[a.data.status].label;
+    t.el.classList.toggle("sel", a === this.selected);
+    t.el.classList.toggle("dim", a.data.status === "offline");
+    t.dot.style.background = col;
+    t.dot.style.boxShadow = pulse !== undefined ? `0 0 0 ${(2 + pulse * 5).toFixed(1)}px ${col}${Math.round(0x8c * (1 - pulse)).toString(16).padStart(2, "0")}` : "";
   }
 
   private buildAgent(d: AgentData, deskIdx: number): Agent3D {
@@ -1114,7 +682,7 @@ export class OfficeScene3D {
     const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)),
       new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; ring.renderOrder = 5; g.add(ring);
-    const tag = this.textSprite(320, 72, 2.8, 0.63); tag.sp.renderOrder = 30; tag.sp.position.set(0, 2.0, 0); g.add(tag.sp);
+    const tag = this.makeTag(g, 2.0);
     const z = this.textSprite(96, 64, 0.75, 0.5), zc = z.c.getContext("2d")!;
     zc.font = "700 34px " + FONT; zc.fillStyle = "#ffffff"; zc.strokeStyle = "rgba(30,40,60,.85)"; zc.lineWidth = 5;
     zc.strokeText("z z z", 6, 42); zc.fillText("z z z", 6, 42); z.tex.needsUpdate = true; z.sp.visible = false; g.add(z.sp);
@@ -1125,8 +693,9 @@ export class OfficeScene3D {
     };
     const a: Agent3D = {
       data: d, group: g, body, lightMat, shirt: sm, legL, legR, armL, armR, book, hit, ring, tag, zzz: z.sp,
-      dots: bubble("…", "rgba(255,255,255,.95)", "#f2a91e"), excl: bubble("!", "#ef4b4b", "#ffffff"),
-      spot: null, path: [], floor: 1, lastNode: "hubC", pose: "stand", atSpot: false, deskIdx, since: null, phase: Math.random() * 6,
+      // "?" = unknown state (the API could not tell what the agent is doing)
+      dots: bubble("…", "rgba(255,255,255,.95)", "#f2a91e"), excl: bubble("?", "#ef4b4b", "#ffffff"),
+      spot: null, path: [], floor: 1, lastNode: "lob", pose: "stand", atSpot: false, deskIdx, since: null, phase: Math.random() * 6,
     };
     hit.userData.agent = a;
     this.drawTag(a);
@@ -1189,7 +758,7 @@ export class OfficeScene3D {
     const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)),
       new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; ring.renderOrder = 5; g.add(ring);
-    const tag = this.textSprite(320, 72, 2.8, 0.63); tag.sp.renderOrder = 30; tag.sp.position.set(0, ORB_Y + ORB_R + 0.45, 0); g.add(tag.sp);
+    const tag = this.makeTag(g, ORB_Y + ORB_R + 0.45);
     // Person-only parts (limbs, bubbles) are inert stand-ins: orbs never walk, pose or use them.
     const stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
     const a: Agent3D = {
@@ -1294,7 +863,7 @@ export class OfficeScene3D {
   }
   private addAgent(id: string, status: AgentStatus, name: string, task: string | null | undefined, meta: AgentMeta) {
     const used = new Set(this.agents.map((x) => x.deskIdx));
-    const nDesks = this.deskScreens.length;
+    const nDesks = this.th.deskScreens.length;
     let desk = meta.desk;
     if (desk === undefined || desk < 0 || desk >= nDesks || used.has(desk)) {
       desk = [...Array(nDesks).keys()].find((i) => !used.has(i)) ?? this.agents.length % nDesks;
@@ -1304,14 +873,16 @@ export class OfficeScene3D {
       color: meta.color || "#6b7785", lastActive: meta.lastActive ?? null, reason: meta.reason ?? "",
     };
     const a = this.buildAgent(d, desk);
+    a.tag.el.addEventListener("click", () => { this.select(a.data.id); this.opts.onSelect?.(a.data.id); });
     this.agents.push(a); this.byId.set(id, a);
     if (a.orb) { // floats in the Lantai 1 lobby; never walks. Its desk stays reserved (screen glows while working).
       const ds = this.spots.filter((x) => x.use[0] === "desk"), s = ds[a.deskIdx % ds.length];
-      this.claim(a, s); a.floor = 1; this.F1.add(a.group);
-      a.group.position.set(ORB_POS.x, 0, ORB_POS.z); a.atSpot = true; this.deskGlow(a);
+      this.claim(a, s); a.floor = 1; this.th.floors[1].add(a.group);
+      a.group.position.set(ORB_POS.x, FT, ORB_POS.z); a.atSpot = true; this.deskGlow(a);
     } else {
       const s = this.pickSpot(a);
       if (s) this.place(a, s);
+      this.setDim(a, d.status === "offline");
     }
     if (this.pendingFocus === id) { this.pendingFocus = null; this.select(id); }
     this.dirty = true;
@@ -1321,10 +892,12 @@ export class OfficeScene3D {
     if (a.spot && a.spot.by === a) a.spot.by = null;
     a.atSpot = false; this.deskGlow(a);
     a.group.parent?.remove(a.group);
+    a.tag.el.remove();
     a.group.traverse((o) => {
       const m = o as THREE.Mesh;
       if ((o as THREE.Sprite).isSprite) { const sm = m.material as THREE.SpriteMaterial; sm.map?.dispose(); sm.dispose(); }
     });
+    const dimShirt = this.dimMats.get(a.shirt); if (dimShirt) { dimShirt.dispose(); this.dimMats.delete(a.shirt); }
     a.shirt.dispose(); a.lightMat.dispose(); (a.ring.material as THREE.Material).dispose();
     if (a.orb) {
       const o = a.orb; // glow sprite material/map are disposed by the sprite traversal above
@@ -1336,6 +909,29 @@ export class OfficeScene3D {
     this.dirty = true;
   }
 
+  /** Offline look: every body material swapped for a darker translucent clone (status lamp stays lit). */
+  private setDim(a: Agent3D, on: boolean) {
+    if (a.orb || !!a.dimmed === on) return;
+    a.dimmed = on;
+    a.body.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || m.material === a.lightMat) return;
+      if (on) {
+        const src = m.material as THREE.Material;
+        let dm = this.dimMats.get(src);
+        if (!dm) {
+          const c = src.clone() as THREE.MeshLambertMaterial;
+          c.color?.multiplyScalar(0.55); c.transparent = true; c.opacity = 0.5; c.depthWrite = false;
+          dm = c; this.dimMats.set(src, dm);
+        }
+        m.userData.mat0 = src; m.material = dm; m.castShadow = false;
+      } else if (m.userData.mat0) {
+        m.material = m.userData.mat0; delete m.userData.mat0; m.castShadow = true;
+      }
+    });
+    this.dirty = true;
+  }
+  private poseFor(a: Agent3D, s: Spot): Pose { return s.pose === "type" && a.data.status !== "working" ? "sit" : s.pose; }
   private setPose(a: Agent3D, p: Pose) {
     a.pose = p; a.body.position.y = 0; a.body.rotation.y = 0; a.dots.visible = false; a.excl.visible = false;
     const sit = p === "sit" || p === "type" || p === "read" || p === "game";
@@ -1344,12 +940,14 @@ export class OfficeScene3D {
     const arm = p === "type" || p === "game" ? -1.15 : p === "read" ? -0.9 : p === "lean" ? -0.75 : 0;
     a.armL.rotation.x = a.armR.rotation.x = arm;
     a.book.visible = p === "read"; a.zzz.visible = p === "lie";
-    if (p === "lie") { a.tag.sp.position.set(0, 0.95, -0.7); a.zzz.position.set(0.25, 0.75, -1.25); } else a.tag.sp.position.set(0, 2.0, 0);
+    if (p === "lie") { a.tag.obj.position.set(0, 0.95, -0.7); a.zzz.position.set(0.25, 0.75, -1.25); } else a.tag.obj.position.set(0, sit ? 1.75 : 2.0, 0);
   }
   private deskGlow(a: Agent3D) {
-    const m = this.deskScreens[a.deskIdx]; if (!m) return;
-    const on = a.orb ? a.data.status === "working" : a.atSpot && a.spot && a.spot.use[0] === "desk";
-    m.emissive.setHex(on ? (a.data.status === "error" ? 0xd03a3a : 0x3fa6ee) : 0x000000);
+    const m = this.th.deskScreens[a.deskIdx]; if (!m) return;
+    const st = a.data.status;
+    const on = a.orb ? st === "working" : a.atSpot && !!a.spot && a.spot.use[0] === "desk" && st !== "offline";
+    m.emissive.setHex(on ? (st === "error" ? 0xd03a3a : 0x3fa6ee) : 0x000000);
+    m.emissiveIntensity = on ? 0.9 : 1;
   }
   private pickSpot(a: Agent3D): Spot | null {
     const use = STATUS[a.data.status].use;
@@ -1359,7 +957,7 @@ export class OfficeScene3D {
     if (!free.length) free = this.spots.filter((s) => s.use.indexOf("idle") >= 0 && !s.by);
     if (!free.length) return a.spot;
     const best = Math.min(...free.map((s) => s.pri));
-    // Deterministic per agent (the reference picks at random), so a reload doesn't reshuffle rooms.
+    // Deterministic per agent, so a reload doesn't reshuffle rooms.
     const cands = free.filter((s) => s.pri === best);
     return cands[hashStr(a.data.id) % cands.length];
   }
@@ -1368,39 +966,44 @@ export class OfficeScene3D {
     a.spot = s; if (s) s.by = a;
   }
   private place(a: Agent3D, s: Spot) {
-    this.claim(a, s); a.floor = s.floor; this.floors[s.floor].add(a.group);
+    this.claim(a, s); a.floor = s.floor; this.th.floors[s.floor].add(a.group);
     a.group.position.set(s.x, s.y, s.z); a.group.rotation.y = s.rot; a.lastNode = s.node; a.path = []; a.atSpot = true;
-    this.setPose(a, s.pose); this.deskGlow(a);
+    this.setPose(a, this.poseFor(a, s)); this.deskGlow(a);
   }
+  /** Walk to a spot: route to the stairs, climb/descend floor by floor, then route to the spot's node. */
   private go(a: Agent3D, s: Spot | null) {
     if (!s) return;
     if (a.spot === s && (a.atSpot || a.path.length)) { this.deskGlow(a); return; }
-    this.claim(a, s); if (a.atSpot) a.group.position.y = 0; a.atSpot = false; this.deskGlow(a); this.setPose(a, "walk");
+    this.claim(a, s); if (a.atSpot) a.group.position.y = FT; a.atSpot = false; this.deskGlow(a); this.setPose(a, "walk");
     if (this.reduce) { this.place(a, s); this.dirty = true; return; }
     const path: Waypoint[] = [];
-    const add = (n: GNode) => path.push({ x: n.x, z: n.z, y: 0, node: n.id });
-    if (a.floor === s.floor) this.route(a.floor, a.lastNode, s.node).forEach(add);
-    else if (a.floor === 1) {
-      this.route(1, a.lastNode, "S1").forEach(add);
-      path.push({ x: 4.0, z: 3.75, y: 0 }, { x: 0.1, z: 3.75, y: 3.2, switchTo: 2, yAfter: 0 });
-      this.route(2, "S2", s.node).forEach(add);
-    } else {
-      this.route(2, a.lastNode, "S2").forEach(add);
-      path.push({ x: 0.1, z: 3.75, y: 0, switchTo: 1, yAfter: 3.2 }, { x: 4.0, z: 3.75, y: 0 });
-      this.route(1, "S1", s.node).forEach(add);
+    const add = (n: GNode) => path.push({ x: n.x, z: n.z, y: FT, node: n.id });
+    const sx = wx(STAIR.x), zb = wz(STAIR.bottom), zt = wz(STAIR.top);
+    let f = a.floor, last = a.lastNode;
+    for (let guard = 0; f !== s.floor && guard < 4; guard++) {
+      if (s.floor > f) {
+        this.route(f, last, "stB").forEach(add);
+        path.push({ x: sx, z: zb, y: FT }, { x: sx, z: zt, y: FT + LH, switchTo: (f + 1) as FloorNo, yAfter: FT, node: "arr" });
+        f = (f + 1) as FloorNo; last = "arr";
+      } else {
+        this.route(f, last, "arr").forEach(add);
+        path.push({ x: sx, z: zt, y: FT, switchTo: (f - 1) as FloorNo, yAfter: FT + LH }, { x: sx, z: zb, y: FT });
+        f = (f - 1) as FloorNo; last = "stB";
+        add(this.G[f].stB);
+      }
     }
-    path.push({ x: s.x, z: s.z, y: 0, spot: s });
+    this.route(f, last, s.node).forEach(add);
+    path.push({ x: s.x, z: s.z, y: FT, spot: s });
     a.path = path;
   }
   private reach(a: Agent3D, wp: Waypoint) {
     if (wp.node) a.lastNode = wp.node;
     if (wp.switchTo) {
-      a.floor = wp.switchTo; this.floors[a.floor].add(a.group); a.group.position.y = wp.yAfter ?? 0;
-      a.lastNode = wp.switchTo === 2 ? "S2" : "S1"; this.dirty = true;
+      a.floor = wp.switchTo; this.th.floors[a.floor].add(a.group); a.group.position.y = wp.yAfter ?? FT; this.dirty = true;
     }
     if (wp.spot) {
-      a.group.rotation.y = wp.spot.rot; a.group.position.y = wp.spot.y; a.atSpot = true;
-      this.setPose(a, wp.spot.pose); this.deskGlow(a); this.dirty = true;
+      a.group.rotation.y = wp.spot.rot; a.group.position.y = wp.spot.y; a.atSpot = true; a.lastNode = wp.spot.node;
+      this.setPose(a, this.poseFor(a, wp.spot)); this.deskGlow(a); this.dirty = true;
     }
   }
   private stepAgent(a: Agent3D, dt: number, t: number) {
@@ -1422,17 +1025,15 @@ export class OfficeScene3D {
     const st = a.data.status;
     if (st === "error") a.lightMat.color.setHex(Math.sin(t * 9) > 0 ? 0xef4b4b : 0x6b1d1d);
     a.dots.visible = st === "waiting"; a.excl.visible = st === "error";
-    if (a.pose === "stand" || a.pose === "lean" || a.pose === "sit") a.body.rotation.y = Math.sin(t * 0.5 + a.phase) * 0.18; else a.body.rotation.y = 0;
+    if (a.pose === "stand" || a.pose === "lean" || a.pose === "sit") a.body.rotation.y = st === "offline" ? 0 : Math.sin(t * 0.5 + a.phase) * 0.18; else a.body.rotation.y = 0;
     if (a.pose === "type") {
-      const e = st === "error";
-      a.armL.rotation.x = -1.15 + (e ? 0 : Math.sin(ph * 1.7) * 0.07); a.armR.rotation.x = -1.15 + (e ? 0 : Math.cos(ph * 1.9) * 0.07);
-      a.body.rotation.z = e ? Math.sin(ph * 0.8) * 0.04 : 0;
+      a.armL.rotation.x = -1.15 + Math.sin(ph * 1.7) * 0.07; a.armR.rotation.x = -1.15 + Math.cos(ph * 1.9) * 0.07;
     } else if (a.pose === "play") { a.armR.rotation.x = -0.9 + Math.sin(ph * 0.7) * 0.6; a.armL.rotation.x = -0.3; }
     else if (a.pose === "game") { a.armL.rotation.x = -1.1 + Math.sin(ph) * 0.05; a.armR.rotation.x = -1.1 + Math.cos(ph) * 0.05; }
     else if (a.pose === "lie") a.zzz.position.y = 0.75 + Math.sin(ph * 0.25) * 0.08;
-    if (a.pose !== "type") a.body.rotation.z = 0;
   }
   private locText(a: Agent3D) {
+    if (a.orb) return "Lobby, lantai 1";
     const s = a.spot; if (!s) return "–";
     return (a.atSpot ? "" : "Menuju ") + s.room + ", lantai " + s.floor;
   }
@@ -1476,13 +1077,6 @@ export class OfficeScene3D {
     this.sidebarOpen = open;
     try { localStorage.setItem(SIDEBAR_KEY, String(open)); } catch { /* storage unavailable */ }
     this.applySidebar();
-    // The default views leave room for the panel on wide screens; slide the camera by that same
-    // margin (keeping any user orbit) so the scene re-centres in the full-width canvas.
-    if (this.wide()) {
-      const d = new THREE.Vector3(open ? 2.6 : -2.6, 0, 0), base = this.tween;
-      const t = (base ? base.tt : this.controls.target).clone().add(d), p = (base ? base.tp : this.camera.position).clone().add(d);
-      this.flyTo(t, p);
-    }
   }
   private faceIcon(a: Agent3D) {
     const orb = a.orb ? a.orb.state : null;
@@ -1512,6 +1106,7 @@ export class OfficeScene3D {
       const av = el("span", "o3d-avatar"), face = el("img"); face.src = this.faceIcon(a); face.alt = ""; face.draggable = false;
       av.style.background = a.orb ? "#1c1f26" : a.data.color; av.appendChild(face);
       if (a.orb) b.classList.add("o3d-orb", "o3d-orb-" + a.orb.state);
+      if (a.data.status === "offline") b.classList.add("o3d-off");
       const st = el("i"); st.style.background = STATUS[a.data.status].color; av.appendChild(st);
       const oc = a.data.id.startsWith("openclaw:");
       const fw = el("span", "o3d-fw " + (oc ? "badge-openclaw" : "badge-hermes"), oc ? "OC" : "H");
@@ -1549,27 +1144,21 @@ export class OfficeScene3D {
   }
 
   // ================================================================== camera / floors
-  private wide() { return this.host.clientWidth > 780; }
-  private viewFor(m: Mode) {
-    const v = VIEWS[m], asp = this.camera.aspect || 1.6, f = Math.min(3.2, Math.max(1, 1.4 / asp));
-    const t = new THREE.Vector3(v.t[0] + (this.wide() && this.sidebarOpen ? 2.6 : 0), v.t[1] - (this.wide() ? 0 : (m === "all" ? 1.5 : 1.2) * f), v.t[2]);
-    return { t, p: new THREE.Vector3(t.x + v.o[0] * f, t.y + v.o[1] * f, t.z + v.o[2] * f) };
-  }
-  private flyTo(t: THREE.Vector3, p: THREE.Vector3) {
+  private flyTo(t: THREE.Vector3, p: THREE.Vector3, dur = 0.7) {
     if (this.reduce) { this.controls.target.copy(t); this.camera.position.copy(p); this.tween = null; return; }
-    this.tween = { ft: this.controls.target.clone(), fp: this.camera.position.clone(), tt: t, tp: p, k: 0 };
+    this.tween = { ft: this.controls.target.clone(), fp: this.camera.position.clone(), tt: t, tp: p, k: 0, dur };
   }
-  private setMode(m: Mode, keepCam = false) {
-    this.mode = m;
-    this.F2.visible = m !== "f1";
-    if (m === "all") this.f2Target.set(0, 11.2, -3); else this.f2Target.set(0, 3.2, 0);
-    if (this.reduce || m === "f1") this.F2.position.copy(this.f2Target);
-    this.applyLabels();
-    if (!keepCam) { const v = this.viewFor(m); this.flyTo(v.t, v.p); }
+  /** Reference targetY(): camera target height per mode. */
+  private targetY(m: FloorMode) { return m === "all" ? 3.5 : m === "x" ? 8 : (m - 1) * LH + 1.2; }
+  private setMode(m: FloorMode, keepCam = false, instant = false) {
+    this.th.setMode(m);
+    if (keepCam) return;
+    const dy = this.targetY(m) - this.controls.target.y;
+    const t = this.controls.target.clone().setY(this.controls.target.y + dy), p = this.camera.position.clone().setY(this.camera.position.y + dy);
+    if (instant) { this.controls.target.copy(t); this.camera.position.copy(p); this.tween = null; } else this.flyTo(t, p);
   }
-  private applyLabels() {
-    this.labels.forEach((l) => { l.visible = this.showLabels && !(this.mode === "f2" && l.userData.floor === 1); });
-  }
+  /** Agent tags are readable when their floor is the one shown (or the whole building / split view is shown). */
+  private tagVisible(a: Agent3D) { const m = this.th.mode; return m === "all" || m === "x" || m === 4 || a.floor === m; }
   private select(id: string | null) {
     const prev = this.selected;
     this.selected = id === null || id === undefined ? null : this.byId.get(String(id)) ?? null;
@@ -1577,27 +1166,19 @@ export class OfficeScene3D {
     const a = this.selected;
     if (a) {
       a.ring.visible = true; this.drawTag(a);
-      if (this.mode === "f1" && a.floor === 2) { this.setMode("f2", true); this.opts.onPresetChange?.("lounge"); }
-      else if (this.mode === "f2" && a.floor === 1) { this.setMode("f1", true); this.opts.onPresetChange?.("workspace"); }
-      const base = a.floor === 2 ? this.f2Target : new THREE.Vector3(0, 0, 0), lp = a.group.position;
-      const t = new THREE.Vector3(base.x + lp.x, base.y + lp.y + 0.8, base.z + lp.z);
-      const off = this.camera.position.clone().sub(this.controls.target);
-      off.setLength(Math.max(Math.min(off.length(), 24), 13));
-      this.flyTo(t, t.clone().add(off));
+      const m = this.th.mode;
+      if (m !== "x" && m !== a.floor) { this.th.setMode(a.floor); this.opts.onPresetChange?.(a.floor); }
+      const f = this.th.floors[a.floor], p = a.group.getWorldPosition(new THREE.Vector3());
+      p.y += this.th.yTarget[a.floor] - f.position.y + 0.8;
+      const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+      if (dir.y < 0.45) { dir.y = 0.6; dir.normalize(); }
+      this.flyTo(p, p.clone().add(dir.multiplyScalar(16)), 0.9);
     }
     this.dirty = true;
   }
 
   // ================================================================== theme
-  private applyTheme() {
-    const v = THEME[this.tod === "night" ? "night" : "day"];
-    this.scene.background = new THREE.Color(v.bg);
-    this.hemi.intensity = v.hemi * Math.PI; this.hemi.color.setHex(v.hemiColor);
-    this.sun.intensity = v.sun * Math.PI; this.sun.color.setHex(v.sunColor);
-    const isNight = this.tod === "night";
-    this.lampLights.forEach((l) => { l.intensity = (isNight ? LAMP.nightI : LAMP.dayI) * Math.PI; });
-    this.lampBulbs.forEach((b) => { b.material.color.setHex(isNight ? LAMP.bulbNight : LAMP.bulbDay); });
-  }
+  private applyTheme() { this.th.setNight(this.tod === "night"); }
 
   // ================================================================== events + loop
   private onControlsStart = () => { this.tween = null; };
@@ -1609,7 +1190,7 @@ export class OfficeScene3D {
     const r = this.renderer.domElement.getBoundingClientRect();
     const m = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.ray.setFromCamera(m, this.camera);
-    const hits = this.ray.intersectObjects(this.agents.filter((a) => a.floor === 1 || this.F2.visible).map((a) => a.hit), false);
+    const hits = this.ray.intersectObjects(this.agents.filter((a) => this.th.floors[a.floor].visible && this.tagVisible(a)).map((a) => a.hit), false);
     const a = hits.length ? (hits[0].object.userData.agent as Agent3D) : null;
     this.select(a ? a.data.id : null);
     if (a) this.opts.onSelect?.(a.data.id);
@@ -1617,11 +1198,22 @@ export class OfficeScene3D {
   private resize = () => {
     const w = this.host.clientWidth || 1, h = this.host.clientHeight || 1;
     this.renderer.setSize(w, h, false);
+    this.css.setSize(w, h);
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
   };
-  private updateWalls() {
-    const dx = this.camera.position.x - this.controls.target.x, dz = this.camera.position.z - this.controls.target.z, l = Math.hypot(dx, dz) || 1;
-    for (const w of this.walls) { const lowOn = (dx * w.nx + dz * w.nz) / l > 0.15; w.tall.visible = !lowOn; w.low.visible = lowOn; }
+  /** Reference updateLabels(): room labels for the visible floor only, faded with distance, hidden past 95 m. */
+  private updateLabels() {
+    const cam = this.camera.position, v = this.tmpV;
+    for (const L of this.th.labels) {
+      let show = this.showLabels && this.th.labelVisible(L.floor);
+      if (show) {
+        L.obj.getWorldPosition(v); const dist = v.distanceTo(cam);
+        if (dist > 95) show = false;
+        else L.obj.element.style.opacity = dist > 60 ? String(Math.max(0.35, 1 - (dist - 60) / 50)) : "1";
+      }
+      L.obj.visible = show;
+    }
+    for (const a of this.agents) a.tag.obj.visible = this.tagVisible(a);
   }
   private frame = (now: number) => {
     this.raf = requestAnimationFrame(this.frame);
@@ -1629,21 +1221,22 @@ export class OfficeScene3D {
     const dt = Math.min(Math.max(0, (now - this.last) / 1000), 0.25); this.last = now;
     this.elapsed += dt;
     const t = this.elapsed;
-    this.F2.position.lerp(this.f2Target, Math.min(1, dt * 5));
+    this.th.update(this.reduce ? 0 : dt, t, this.controls.target);
+    if (this.reduce) for (const n of [1, 2, 3, 4] as const) this.th.floors[n].position.y = this.th.yTarget[n];
     if (this.tween) {
-      const tw = this.tween; tw.k = Math.min(1, tw.k + dt / 0.7);
+      const tw = this.tween; tw.k = Math.min(1, tw.k + dt / tw.dur);
       const k = tw.k, e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
       this.controls.target.lerpVectors(tw.ft, tw.tt, e); this.camera.position.lerpVectors(tw.fp, tw.tp, e);
       if (k >= 1) this.tween = null;
     }
-    this.controls.update(); this.updateWalls();
-    for (const a of this.agents) { if (a.orb) this.stepOrb(a, dt, t); else this.stepAgent(a, dt, t); a.tag.sp.visible = !(this.mode === "f2" && a.floor === 1); }
-    if (!this.reduce) for (const fn of this.animators) fn(dt, t);
-    else if (this.animators.length) this.animators[0](dt, t); // clock hands only
+    this.controls.update();
+    for (const a of this.agents) { if (a.orb) this.stepOrb(a, dt, t); else this.stepAgent(a, dt, t); }
     this.detailClock += dt;
     if (this.detailClock > 1) { this.detailClock = 0; if (this.selected) this.renderDetail(); }
     if (this.dirty) { this.dirty = false; this.renderRoster(); }
+    this.updateLabels();
     this.renderer.render(this.scene, this.camera);
+    this.css.render(this.scene, this.camera);
     if (!this.firstFrame) { this.firstFrame = true; this.opts.onFirstFrame?.(); }
   };
 }
