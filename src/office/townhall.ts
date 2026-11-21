@@ -810,7 +810,7 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     const tc = document.createElement("canvas"); tc.width = 1024; tc.height = 420; const tx = tc.getContext("2d")!;
     tx.clearRect(0, 0, 1024, 420); tx.fillStyle = "#ffffff"; tx.textAlign = "center"; tx.textBaseline = "middle";
     tx.font = '600 104px "Plus Jakarta Sans", Arial, sans-serif'; tx.fillText("This Building is", 512, 110); tx.fillText("Solar Powered", 512, 240);
-    tx.font = '500 34px "Plus Jakarta Sans", Arial, sans-serif'; tx.fillText("Town Hall", 512, 330);
+    tx.font = '500 34px "Plus Jakarta Sans", Arial, sans-serif'; tx.fillText("JRRYPTR", 512, 330);
     const tt = new THREE.CanvasTexture(tc);
     const tp = new THREE.Mesh(new THREE.PlaneGeometry(3.9, 1.6), new THREE.MeshBasicMaterial({ map: tt, transparent: true })); tp.position.set(cx, 6.35, z0 + 0.63); f.add(tp);
     // ground floor: white panel, dark beam above the door
@@ -822,9 +822,9 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     for (let i = 0; i < 6; i++) bx(f, cw - 0.3, 0.02, 0.18, "#4a4f55", ccx, cy0 - 0.01, z0 + 0.45 + i * 0.45, false);
     for (let i = 0; i < 5; i++) bx(f, 0.5, 0.015, 0.12, lampMat, ccx - 2.6 + i * 1.3, cy0 - 0.02, z0 + 1.6, false);
     bx(f, cw, 0.12, 0.08, "#1c1e21", ccx, cy0 + 0.38, z0 + cd + 0.06, false);
-    // "TOWN HALL" letters standing on the canopy
+    // "JRRYPTR" letters standing on the canopy
     const lc = document.createElement("canvas"); lc.width = 2048; lc.height = 320;
-    { const x = lc.getContext("2d")!; x.clearRect(0, 0, 2048, 320); x.fillStyle = "#ffffff"; x.textAlign = "center"; x.textBaseline = "middle"; x.font = '800 250px "Plus Jakarta Sans", Arial, sans-serif'; x.fillText("TOWN HALL", 1024, 170); }
+    { const x = lc.getContext("2d")!; x.clearRect(0, 0, 2048, 320); x.fillStyle = "#ffffff"; x.textAlign = "center"; x.textBaseline = "middle"; x.font = '800 250px "Plus Jakarta Sans", Arial, sans-serif'; x.fillText("JRRYPTR", 1024, 170); }
     const ltex = new THREE.CanvasTexture(lc);
     const lw2 = 6.2, lh2 = (lw2 * 320) / 2048;
     for (let k2 = 0; k2 < 6; k2++) {
