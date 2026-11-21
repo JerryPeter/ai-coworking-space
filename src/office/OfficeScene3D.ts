@@ -1,5 +1,5 @@
 // 3D Office: the "Town Hall AI Agent" multi-floor building (src/office/townhall.ts, ported from the
-// standalone HTML reference) with Agent Cockpit Control's real agents living inside it.
+// standalone HTML reference) with Agent Control Center's real agents living inside it.
 //
 // What this class owns (the integration layer, unchanged in behaviour):
 // - Agents only change when Office.tsx pushes real /api/office/state + /api/openclaw/agents data in through

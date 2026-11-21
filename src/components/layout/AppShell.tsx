@@ -107,7 +107,7 @@ export function AppShell({ children, subtitle }: { children: ReactNode; subtitle
       <aside className={`sidebar${collapsed ? " collapsed" : ""}${narrow ? " overlay" : ""}`} aria-label="Primary">
         <div className="sidebar-brand">
           <span className="brand-mark"><Box size={16} /></span>
-          <span className="brand-name fade-label">Agent Cockpit Control</span>
+          <span className="brand-name fade-label">Agent Control Center</span>
           <span className="brand-tag fade-label">v2</span>
         </div>
         <nav className="nav">
@@ -155,7 +155,7 @@ export function AppShell({ children, subtitle }: { children: ReactNode; subtitle
         {down && (
           <div className="outage-banner" role="alert">
             <TriangleExclamationPoint size={16} />
-            Can't reach Agent Cockpit Control API on :8742.{conn.lastSuccess ? ` Showing last data from ${clock(conn.lastSuccess)}.` : ""}
+            Can't reach Agent Control Center API on :8742.{conn.lastSuccess ? ` Showing last data from ${clock(conn.lastSuccess)}.` : ""}
           </div>
         )}
         <main key={view} className={`content${view === "office" ? " flush" : ""}${down ? " dimmed" : ""}`}>

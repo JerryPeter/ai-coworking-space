@@ -6,7 +6,7 @@
 // - Lights are physical since r155: reference intensities are multiplied by PI (OfficeScene3D also turns
 //   colour management off while the scene lives, so hex colours / canvas textures match the r128 look).
 // - Room labels are CSS2DObjects (rendered by OfficeScene3D's CSS2DRenderer) instead of hand-projected divs.
-// - The reference's sample agents (AGENT_NAMES / agentAt) are NOT ported: Agent Cockpit Control shows only real
+// - The reference's sample agents (AGENT_NAMES / agentAt) are NOT ported: Agent Control Center shows only real
 //   agents, placed by OfficeScene3D. The 13 "Ruang Kerja" workstations on Lantai 1 get their own screen
 //   material (deskScreens[]) so a desk lights up when a real agent works there.
 // - Ambient townsfolk (vendors, pedestrians, satpam) stay: they are scenery, not agents.

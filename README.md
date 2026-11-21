@@ -1,6 +1,6 @@
-# Agent Cockpit Control
+# Agent Control Center
 
-Agent Cockpit Control (formerly Mission Control V2): local, read-only dashboard for the Hermes agent team (default/Hawa, goku_cto, bejita_video_editor,
+Agent Control Center (formerly Mission Control V2): local, read-only dashboard for the Hermes agent team (default/Hawa, goku_cto, bejita_video_editor,
 kuririn_dev_lead, bulma_uiux) with a Three.js "office" view. Successor to ~/mission-control (v1).
 
 - Backend: FastAPI (Python venv) in `api/`. Reads ~/.hermes strictly read-only
