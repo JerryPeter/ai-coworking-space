@@ -8,7 +8,7 @@
 //     idle    → Lantai 2 Perpustakaan & Lounge / Coffee Corner   break (OpenClaw recent run) → Lantai 3 Ruang Game / Tempat Istirahat
 //     waiting → Lantai 1 Lobby                                   offline → dimmed at own desk    unknown → own desk with "?"
 //   Agents walk there along a waypoint graph per floor and take the stairs between floors.
-// - Claude Code CLI = the clay/glass WebGL shader orb, floating in the Lantai 1 lobby by the entrance.
+// - Claude Code CLI = the clay/glass WebGL shader orb, floating in the far south-west corner of the Lantai 2 agent work area.
 // - Right-hand agent roster + detail panel (DOM, Hermes "H" / OpenClaw "OC" badges, toggle button).
 // - Corner floor lamps that light up at night (setTimeOfDay → TownHall.setNight).
 //
@@ -106,8 +106,9 @@ interface Orb {
   fxMats: THREE.ShaderMaterial[]; textures: THREE.Texture[]; light: THREE.PointLight;
   pulse: number; spin: number; time: number; tagClock: number;
 }
-/** Claude CLI orb: floats in the Lantai 1 lobby, just inside the glass entrance (floor-plan px 1050, 1682). */
-const ORB_POS = { x: wx(1050), z: wz(1682) };
+/** Claude CLI orb: floats in the empty south-west corner of the Lantai 2 "Area Kerja Agen" (floor-plan px 540, 950),
+    clear of the agent pods (x 760-1200), the west wall (x 445) and the library wall (y 1070). */
+const ORB_POS = { x: wx(540), z: wz(950) };
 const ORB_Y = 1.6;   // centre height above the floor (about a character's shoulder)
 const ORB_R = 0.5;   // glass sphere radius (1u across, roughly one character)
 const ORB_EMBERS = 80, ORB_TENDRILS = 16, ORB_SEG = 14;
@@ -875,9 +876,9 @@ export class OfficeScene3D {
     const a = this.buildAgent(d, desk);
     a.tag.el.addEventListener("click", () => { this.select(a.data.id); this.opts.onSelect?.(a.data.id); });
     this.agents.push(a); this.byId.set(id, a);
-    if (a.orb) { // floats in the Lantai 1 lobby; never walks. Its desk stays reserved (screen glows while working).
+    if (a.orb) { // floats in the Lantai 2 work-area corner; never walks. Its desk stays reserved (screen glows while working).
       const ds = this.spots.filter((x) => x.use[0] === "desk"), s = ds[a.deskIdx % ds.length];
-      this.claim(a, s); a.floor = 1; this.th.floors[1].add(a.group);
+      this.claim(a, s); a.floor = 2; this.th.floors[2].add(a.group);
       a.group.position.set(ORB_POS.x, FT, ORB_POS.z); a.atSpot = true; this.deskGlow(a);
     } else {
       const s = this.pickSpot(a);
@@ -1033,7 +1034,7 @@ export class OfficeScene3D {
     else if (a.pose === "lie") a.zzz.position.y = 0.75 + Math.sin(ph * 0.25) * 0.08;
   }
   private locText(a: Agent3D) {
-    if (a.orb) return "Lobby, lantai 1";
+    if (a.orb) return "Area Kerja Agen, lantai 2";
     const s = a.spot; if (!s) return "–";
     return (a.atSpot ? "" : "Menuju ") + s.room + ", lantai " + s.floor;
   }

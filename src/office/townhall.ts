@@ -940,9 +940,9 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     put(g, Toilet(), 1240, 1703, 0); put(g, Sink(), 1305, 1704, 0);
     put(g, Workstation(), 1310, 1805, -90); put(g, Plant(0.7), 1235, 1740);
     // sconces, floor lamps, dispensers
-    [[560, 311, 180], [900, 311, 180], [1553, 420, -90], [1553, 640, -90], [453, 760, -90], [453, 960, -90], [900, 1557, 0], [1080, 1557, 0], [520, 1313, 180], [640, 1313, 180],
-      [520, 1443, 180], [640, 1443, 180], [520, 1573, 180], [640, 1573, 180], [746, 1585, -90], [1145, 620, -90], [1800, 560, 90], [1330, 1280, 90], [1330, 1450, 90]].forEach((a) => put(g, Sconce(), a[0], a[1], a[2]));
-    put(g, FloorLamp(), 690, 1550); put(g, FloorLamp(true), 470, 1705); put(g, FloorLamp(true), 1560, 320); put(g, FloorLamp(), 465, 1100); put(g, FloorLamp(), 1120, 1290);
+    [[560, 311, 180], [1553, 420, -90], [1553, 640, -90], [453, 760, -90], [453, 960, -90], [900, 1557, 0], [1080, 1557, 0], [520, 1313, 180],
+      [520, 1443, 180], [520, 1573, 180], [746, 1585, -90], [1145, 620, -90], [1800, 560, 90], [1330, 1280, 90], [1330, 1450, 90]].forEach((a) => put(g, Sconce(), a[0], a[1], a[2]));
+    put(g, FloorLamp(), 690, 1550); put(g, FloorLamp(), 470, 1705); put(g, FloorLamp(true), 1560, 320); put(g, FloorLamp(), 465, 1100); put(g, FloorLamp(), 1120, 1290);
     put(g, ArcLamp(), 955, 612, 90); put(g, ArcLamp(), 870, 1322, -45); put(g, FloorLamp(), 755, 1705); put(g, FloorLamp(true), 1790, 782); put(g, FloorLamp(), 1125, 1142);
     put(g, Dispenser(), 752, 1600, -90);
     roomLabel(g, "Ruang Meeting Utama", 712, 470, 2.6); roomLabel(g, "Lounge & Ruang Tamu", 850, 840); roomLabel(g, "Pantry & Café", 1330, 600);
