@@ -4,7 +4,7 @@
 // What this class owns (the integration layer, unchanged in behaviour):
 // - Agents only change when Office.tsx pushes real /api/office/state + /api/openclaw/agents data in through
 //   setAgentState()/setRobotState(). No simulation. State → room:
-//     working → own desk in Lantai 1 "Ruang Kerja" (typing)      reviewing (meeting) → Lantai 1 Ruang Meeting Utama
+//     working → own desk in Lantai 1 "Ruang Kerja" (typing; Hawa → Ruang COO, L2)   reviewing (meeting) → Lantai 1 Ruang Meeting Utama
 //     idle    → Lantai 2 Perpustakaan & Lounge / Coffee Corner   break (OpenClaw recent run) → Lantai 3 Ruang Game / Tempat Istirahat
 //     waiting → Lantai 1 Lobby                                   offline → dimmed at own desk    unknown → own desk with "?"
 //   Agents walk there along a waypoint graph per floor and take the stairs between floors.
@@ -263,6 +263,13 @@ const D2R = Math.PI / 180;
 const HOME_CAM = new THREE.Vector3(-34, 40, 50), HOME_TGT = new THREE.Vector3(0, 3, 2);
 /** Stairwell (floor-plan px): x centre, bottom step edge, top step edge. Same footprint on Lantai 1 and 2. */
 const STAIR = { x: 1303, bottom: 1240, top: 1068 };
+
+/** Personal work seats, keyed by profile id: where an agent sits while `working` instead of its Lantai 1 desk.
+ *  px/py/rot = the workstation as placed in townhall.ts (chair 0.62 m behind it); node = Lantai 2 walk-graph node. */
+const SEATS: Record<string, { floor: FloorNo; room: string; px: number; py: number; rot: number; node: string }> = {
+  // Hawa (profile "default") → Ruang COO workstation, townhall.ts buildL2: put(g, Workstation(), 1725, 405, 180).
+  default: { floor: 2, room: "Ruang COO", px: 1725, py: 405, rot: 180, node: "coo" },
+};
 
 function hashStr(s: string) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
 function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -640,6 +647,14 @@ export class OfficeScene3D {
     this.spot(2, "Coffee Corner", "idle", 862.5, 1560, -90, "sit", "cc", { y: 0.05 }); this.spot(2, "Coffee Corner", "idle", 937.5, 1560, 90, "sit", "cc0", { y: 0.05 });
     this.spot(2, "Coffee Corner", "idle", 1022.5, 1620, -90, "sit", "cc0", { y: 0.05 }); this.spot(2, "Coffee Corner", "idle", 1097.5, 1620, 90, "sit", "cc0", { y: 0.05 });
     this.spot(2, "Coffee Corner", "idle", 500, 1520, 180, "sit", "cc", { y: 0.05, pri: 1 }); this.spot(2, "Coffee Corner", "idle", 560, 1560, 180, "sit", "cc", { y: 0.05, pri: 1 });
+    /* ---------- Lantai 2: personal work seats (SEATS, keyed by profile id) ---------- */
+    // Corridor east of the pods (x 1350) north to the collaboration area, east to the Ruang COO door gap (x 1650-1688, wall y 474).
+    n2("cooA", 1350, 1000); n2("cooB", 1350, 500); n2("cooC", 1669, 500); n2("cooD", 1669, 440); n2("coo", 1669, 374);
+    this.link(2, "arr", "cooA", "cooB", "cooC", "cooD", "coo");
+    Object.entries(SEATS).forEach(([profile, st]) => {
+      const [x, z] = this.off(st.px, st.py, st.rot, 0, 0.62);
+      this.spot(st.floor, st.room, "seat:" + profile, x, z, st.rot, "type", st.node, { y: 0.05 });
+    });
 
     /* ---------- Lantai 3: game room / rest area (break) ---------- */
     const n3 = (id: string, x: number, y: number) => this.node(3, id, x, y);
@@ -952,6 +967,7 @@ export class OfficeScene3D {
   }
   private pickSpot(a: Agent3D): Spot | null {
     const use = STATUS[a.data.status].use;
+    if (a.data.status === "working") { const own = this.spots.find((s) => s.use[0] === "seat:" + a.data.id); if (own) return own; }
     if (use === "desk") { const ds = this.spots.filter((s) => s.use[0] === "desk"); return ds[a.deskIdx % ds.length]; }
     if (a.spot && a.spot.use.indexOf(use) >= 0) return a.spot;
     let free = this.spots.filter((s) => s.use.indexOf(use) >= 0 && !s.by);
@@ -1035,6 +1051,7 @@ export class OfficeScene3D {
   }
   private locText(a: Agent3D) {
     if (a.orb) return "Area Kerja Agen, lantai 2";
+    // Seat-holders (e.g. Hawa → Ruang COO) get their room from the spot itself: "Ruang COO, lantai 2".
     const s = a.spot; if (!s) return "–";
     return (a.atSpot ? "" : "Menuju ") + s.room + ", lantai " + s.floor;
   }

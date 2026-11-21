@@ -984,6 +984,7 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     put(g, Toilet(), 1163, 510, 90); put(g, Sink(), 1110, 484, 180);
     // Manager rooms B, C
     put(g, Workstation(), 1566, 405, 180); put(g, Workstation(), 1725, 405, 180); put(g, Plant(0.8), 1505, 320); put(g, Plant(0.8), 1790, 320);
+    // ^ Ruang COO desk (1725, 405) = Hawa's working seat (OfficeScene3D SEATS.default)
     // Agent pods
     const pods = [[760, 690], [980, 690], [1200, 690], [760, 900], [980, 900], [1200, 900]];
     pods.forEach((p) => {
