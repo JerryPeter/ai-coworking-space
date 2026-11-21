@@ -61,7 +61,6 @@ const toolStatus = (s: ToolState | undefined): AgentStatus => (s === "working" ?
 /** OpenCode entry of GET /api/agents/tools (state is working|standby|offline; anything else → unknown). */
 const OPC_STATES: readonly OpenCodeState[] = ["working", "standby", "offline"];
 const OPC_LABEL: Record<OpenCodeState, string> = { working: "Bekerja", standby: "Standby", offline: "Offline", unknown: "Tidak diketahui" };
-const OPC_DOT: Record<OpenCodeState, string> = { working: "#14B8A6", standby: "#0d7f74", offline: "#7b8794", unknown: "#ef4b4b" };
 function openCodeTool(tools: { name: string; state: string; detail: string | null }[] | undefined): { state: OpenCodeState; detail: string } {
   const t = tools?.find((x) => x.name === "OpenCode");
   if (!t) return { state: "unknown", detail: tools ? "OpenCode tidak ada di /api/agents/tools" : "Memuat status OpenCode…" };
@@ -258,12 +257,6 @@ export default function Office() {
               <button key={String(p)} aria-pressed={preset === p} title={title} onClick={() => { setPreset(p); scene.current?.preset(p); }}>{label}</button>
             ))}
           </div>
-          <span className="ov-sep" aria-hidden="true" />
-          <span className="xs" role="status" title={`OpenCode · ${OPC_LABEL[opc.state]}${opc.detail ? ` · ${opc.detail}` : ""}`}
-            aria-label={`OpenCode ${OPC_LABEL[opc.state]}`}
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 7px", borderRadius: 4, fontWeight: 700, background: "#14201F", color: "#5eead4" }}>
-            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: OPC_DOT[opc.state] }} />OPC
-          </span>
           <span className="ov-sep" aria-hidden="true" />
           <div className="segmented">
             <button ref={popBtn} className="icon" aria-pressed={popOpen} aria-expanded={popOpen} aria-controls="th-visual-pop" aria-label="Pengaturan visual" title="Pengaturan visual"
