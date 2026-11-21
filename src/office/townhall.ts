@@ -1261,9 +1261,9 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     for (let i = 0; i <= 5; i++) bx(g, 3.2, 0.01, 0.08, "#ffffff", wx(1724), 0.03, wz(1090 + i * 120), false);
     for (let i = 0; i <= 5; i++) { bx(g, 1.8, 0.01, 0.06, "#ffffff", wx(190), 0.03, wz(1305 + i * 87), false); bx(g, 1.8, 0.01, 0.06, "#ffffff", wx(380), 0.03, wz(1305 + i * 87), false); }
     const fc: WallOpt = { h: 1.1, base: 0, c: "#c9cdd2", cap: "#7d838b", noLintel: 1 };
-    wall(g, 100, 1300, 100, 2010, fc); wall(g, 100, 2010, 1808, 2010, Object.assign({ gaps: [[985, 1115], [1400, 1700]] }, fc));
+    wall(g, 100, 1300, 100, 2010, fc); wall(g, 100, 2010, 1808, 2010, Object.assign({ gaps: [[940, 1160], [1340, 1760]] }, fc));
     wall(g, 1808, 1068, 1808, 2010, fc); wall(g, 100, 1300, 445, 1300, fc);
-    for (const x of [985, 1115, 1400, 1700]) bx(g, 0.4, 1.5, 0.4, "#5c6168", wx(x), 0, wz(2010));
+    for (const x of [940, 1160, 1340, 1760]) bx(g, 0.4, 1.5, 0.4, "#5c6168", wx(x), 0, wz(2010));
     // ===== sidewalk (diamond paving, yellow guiding blocks, trees & mulch) =====
     const sw = document.createElement("canvas"); sw.width = sw.height = 512;
     {
@@ -1288,26 +1288,30 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     for (let x = -1500; x < 3500; x += 220) bx(g, 2.2, 0.01, 0.14, "#ffffff", wx(x + 60), 0.035, wz(2470), false);
     bx(g, 100, 0.01, 0.1, "#e8e8e8", wx(1000), 0.035, wz(2304), false); bx(g, 100, 0.01, 0.1, "#e8e8e8", wx(1000), 0.035, wz(2636), false);
     // hedge + white planters along the office fence
-    for (const [a, b] of [[-1500, 985], [1115, 1400], [1700, 3500]]) {
+    // Segments stop at the two gates (gaps 940-1160 / 1340-1760 in the fence above); shrubs (r <= 0.5 m = 25 px) stay inside.
+    for (const [a, b] of [[-1500, 940], [1160, 1340], [1760, 3500]]) {
       const len = (b - a) * S; bx(g, len, 0.95, 0.6, "#4e8a3c", wx((a + b) / 2), 0.12, wz(2028));
-      for (let x = a + 30; x < b - 20; x += 60) ico(g, 0.38 + rnd() * 0.12, rnd() > 0.5 ? "#4e8a3c" : "#5c9a46", wx(x), 1.05, wz(2028));
+      for (let x = a + 30; x <= b - 25; x += 60) ico(g, 0.38 + rnd() * 0.12, rnd() > 0.5 ? "#4e8a3c" : "#5c9a46", wx(x), 1.05, wz(2028));
       for (let x = a + 150; x < b - 60; x += 300) { if (x > -300 && x < 0) continue; put(g, WhitePlanter(), x, 2048, 0, 0.12); }
     }
     // trees + mulch, wooden benches, white street lamps
-    const vend = [[300, 90], [640, 90], [1450, 170], [1880, 90], [2270, 100]];
-    for (let x = -1450; x < 3500; x += 240) { if (vend.some((v) => Math.abs(x - v[0]) < v[1])) continue; put(g, MulchPit(), x, 2235, 0, 0); put(g, TreeSlim(0.95 + rnd() * 0.2), x, 2235, rnd() * 360, 0.14); }
-    [-1330, -850, 1060, 2510, 2680].forEach((x) => put(g, ParkBench(), x, 2210, 0, 0.12));
-    [-1450, -490, 470, 1180, 2150, 3110].forEach((x) => { put(g, StreetLamp("#e8e8e8"), x, 2278, 180, 0.12); const pl = new THREE.PointLight("#ffd98a", 0, 16, 1); pl.position.set(wx(x), 3.8, wz(2278) + 0.95); g.add(pl); streetLights.push(pl); });
+    const vend = [[300, 90], [640, 90], [1250, 100], [1880, 90], [2270, 100]];
+    // Keep both gate corridors clear: gate gaps ±60 px margin for the 1.25 m mulch pit.
+    const gateLane = [[880, 1220], [1280, 1820]];
+    for (let x = -1450; x < 3500; x += 240) { if (vend.some((v) => Math.abs(x - v[0]) < v[1]) || gateLane.some(([a, b]) => x >= a && x <= b)) continue; put(g, MulchPit(), x, 2235, 0, 0); put(g, TreeSlim(0.95 + rnd() * 0.2), x, 2235, rnd() * 360, 0.14); }
+    [-1330, -850, 830, 2510, 2680].forEach((x) => put(g, ParkBench(), x, 2210, 0, 0.12));
+    [-1450, -490, 470, 1250, 2150, 3110].forEach((x) => { put(g, StreetLamp("#e8e8e8"), x, 2278, 180, 0.12); const pl = new THREE.PointLight("#ffd98a", 0, 16, 1); pl.position.set(wx(x), 3.8, wz(2278) + 0.95); g.add(pl); streetLights.push(pl); });
     // street vendors (group, toggled from the visual settings)
     const vG = G(); g.add(vG); vendGroup = vG;
     put(vG, CoffeeBike(), 300, 2185, 90, 0.12); put(vG, Folk({ shirt: "#2a7a5a", pants: "#333", hair: "#1b1b1b" }), 300, 2150, 180, 0.12);
     put(vG, FoodCart(), 640, 2185, 0, 0.12); put(vG, Folk({ shirt: "#f0f0f0", pants: "#3b4f6e", hair: "#2d2420" }), 640, 2222, 0, 0.12);
     put(vG, PStool(), 565, 2175, 0, 0.12); put(vG, PStool("#2e86c1"), 715, 2175, 0, 0.12);
     put(vG, Folk({ shirt: "#9b5cc9", pants: "#2f3540", hair: "#5a3a24", sit: true }), 565, 2175, 90, 0.12);
-    put(vG, Stall("#e67e22"), 1450, 2195, 0, 0.12); put(vG, Folk({ shirt: "#c0392b", pants: "#333", hair: "#1b1b1b" }), 1450, 2222, 0, 0.12);
-    put(vG, Folk({ shirt: "#2e86c1", pants: "#2f3540", hair: "#7a4b2a" }), 1410, 2140, 180, 0.12);
+    // Stall sits between the two gates (1160-1340 = 3.6 m; stall 2.9 m wide) so both entrances stay clear.
+    put(vG, Stall("#e67e22"), 1250, 2195, 0, 0.12); put(vG, Folk({ shirt: "#c0392b", pants: "#333", hair: "#1b1b1b" }), 1250, 2222, 0, 0.12);
+    put(vG, Folk({ shirt: "#2e86c1", pants: "#2f3540", hair: "#7a4b2a" }), 1250, 2140, 180, 0.12);
     put(vG, FoodCart(), 1880, 2185, 0, 0.12); put(vG, Folk({ shirt: "#f1c40f", pants: "#2f3540", hair: "#2d2420" }), 1880, 2222, 0, 0.12);
-    roomLabel(vG, "Pedagang kaki lima", 1450, 2185, 2.9);
+    roomLabel(vG, "Pedagang kaki lima", 1250, 2185, 2.9);
     put(vG, PecelLele(), -150, 2116, 0, 0.12);
     put(vG, Folk({ shirt: "#ffffff", pants: "#2f3540", hair: "#1b1b1b" }), -88, 2106, -90, 0.12);
     put(vG, Folk({ shirt: "#d14f6a", pants: "#3b4f6e", hair: "#5a3a24", sit: true }), -162, 2085, 180, 0.12);
@@ -1324,7 +1328,6 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     [[250, 200, 1.2], [140, 470, 1], [330, 640, 1.3], [190, 900, 1.1], [330, 1140, 1], [110, 1180, 0.9], [620, -3000, 1.2], [1000, -3030, 1.4], [1400, -2990, 1.1], [1760, -3020, 1.3], [120, -2300, 1.2], [2120, -2300, 1.3], [150, -2900, 1.1], [2100, -2950, 1.2], [250, -600, 1.2], [2000, -500, 1.3], [250, -1500, 1.3], [2000, -1600, 1.2],
       [1960, 300, 1.2], [2060, 720, 1.4], [1930, 1120, 1], [2070, 1520, 1.3], [1950, 1860, 1.1], [-120, 1520, 1.2], [-160, 1900, 1], [200, 2760, 1.3], [820, 2790, 1.1], [1500, 2760, 1.4], [2150, 2780, 1.2], [-400, 2770, 1]]
       .forEach((t, i) => put(g, Tree(t[2], i % 2), t[0], t[1], rnd() * 360, 0));
-    [[60, 1240], [1880, 1000], [1870, 1300]].forEach((p) => { const s = G(); ico(s, 0.6, "#4aa545", 0, 0.4, 0); ico(s, 0.45, "#5bbf52", 0.5, 0.3, 0.2); put(g, s, p[0], p[1], 0, 0); });
     // pedestrians
     const shirts = ["#e07a3f", "#3fa06b", "#d14f6a", "#3f7fd1"];
     for (let i = 0; i < 4; i++) {

@@ -222,9 +222,11 @@ const SIDEBAR_KEY = "mc.office.sidebarOpen";
 function readSidebarOpen() {
   try { return localStorage.getItem(SIDEBAR_KEY) !== "false"; } catch { return true; }
 }
-const ROOM_PANEL_KEY = "mc.office.roomPanelOpen";
-function readRoomPanelOpen() {
-  try { return localStorage.getItem(ROOM_PANEL_KEY) !== "false"; } catch { return true; }
+/** Active tab of the right-hand panel: agent roster or room shortcuts. */
+type RosterTab = "agents" | "rooms";
+const ROSTER_TAB_KEY = "mc.office.rosterTab";
+function readRosterTab(): RosterTab {
+  try { return localStorage.getItem(ROSTER_TAB_KEY) === "rooms" ? "rooms" : "agents"; } catch { return "agents"; }
 }
 /** Room navigation shortcuts: label centres from townhall.ts roomLabel() (floor-plan px). Toilet/Gudang/Tangga left out. */
 interface RoomNav { name: string; floor: 1 | 2; px: number; pz: number }
@@ -339,9 +341,10 @@ export class OfficeScene3D {
   private sidebarOpen = readSidebarOpen();
   /** Roster face icons (data URLs), keyed by everything that changes the drawing. */
   private faces = new Map<string, string>();
-  // DOM: left-hand room navigation panel.
-  private rooms: { root: HTMLElement; toggle: HTMLButtonElement; entries: HTMLButtonElement[] };
-  private roomPanelOpen = readRoomPanelOpen();
+  // DOM: tab bar (Agen / Ruangan) inside the roster; room shortcut buttons indexed like ROOMS.
+  private tabs!: Record<RosterTab, { btn: HTMLButtonElement; pane: HTMLElement }>;
+  private rosterTab = readRosterTab();
+  private roomEntries: HTMLButtonElement[] = [];
   private activeRoom = -1;
 
   constructor(private host: HTMLElement, opts: SceneOptions = {}) {
@@ -373,8 +376,9 @@ export class OfficeScene3D {
     this.th = createTownHall(this.scene, this.renderer.capabilities.maxTextureSize >= 4096 ? 4096 : 2048);
     this.buildGraph();
 
+    // The old left-hand room panel is gone (merged into the roster as a tab): drop its stale preference once.
+    try { localStorage.removeItem("mc.office.roomPanelOpen"); } catch { /* storage unavailable */ }
     this.ui = this.buildPanel();
-    this.rooms = this.buildRoomPanel();
     this.applyTheme();
 
     const c = this.renderer.domElement;
@@ -497,7 +501,6 @@ export class OfficeScene3D {
     c.remove();
     this.css.domElement.remove();
     this.ui.root.remove(); this.ui.toggle.remove();
-    this.rooms.root.remove(); this.rooms.toggle.remove();
     THREE.ColorManagement.enabled = this.prevColorManagement;
   }
 
@@ -1138,7 +1141,35 @@ export class OfficeScene3D {
     const dl = el("dl");
     detail.append(h3, dl);
     root.id = "o3d-roster-" + Math.random().toString(36).slice(2, 8);
-    root.append(header, list, detail);
+    // Tab bar right under the header: "Agen" (roster + detail, unchanged) and "Ruangan" (room shortcuts).
+    const tablist = el("div", "roster-tabs"); tablist.setAttribute("role", "tablist"); tablist.setAttribute("aria-label", "Panel kantor");
+    const mkTab = (key: RosterTab, label: string) => {
+      const btn = el("button", "roster-tab-btn", label), pane = el("div", "roster-tab-pane");
+      btn.type = "button"; btn.id = root.id + "-tab-" + key; pane.id = root.id + "-pane-" + key;
+      btn.setAttribute("role", "tab"); btn.setAttribute("aria-controls", pane.id);
+      pane.setAttribute("role", "tabpanel"); pane.setAttribute("aria-labelledby", btn.id);
+      btn.addEventListener("click", () => this.setRosterTab(key));
+      tablist.appendChild(btn);
+      return { btn, pane };
+    };
+    this.tabs = { agents: mkTab("agents", "Agen"), rooms: mkTab("rooms", "Ruangan") };
+    const order: RosterTab[] = ["agents", "rooms"];
+    tablist.addEventListener("keydown", (e) => {
+      let k: RosterTab | null = null;
+      const i = order.indexOf(this.rosterTab);
+      if (e.key === "ArrowRight") k = order[(i + 1) % order.length];
+      else if (e.key === "ArrowLeft") k = order[(i - 1 + order.length) % order.length];
+      else if (e.key === "Home") k = order[0];
+      else if (e.key === "End") k = order[order.length - 1];
+      if (!k) return;
+      e.preventDefault();
+      this.setRosterTab(k);
+      this.tabs[k].btn.focus();
+    });
+    this.tabs.agents.pane.append(list, detail);
+    this.tabs.rooms.pane.appendChild(this.buildRoomList(root.id));
+    root.append(header, tablist, this.tabs.agents.pane, this.tabs.rooms.pane);
+    this.applyRosterTab();
     const toggle = el("button", "ov o3d-toggle"); toggle.type = "button";
     toggle.setAttribute("aria-controls", root.id);
     toggle.addEventListener("click", () => this.setSidebar(!this.sidebarOpen));
@@ -1230,54 +1261,38 @@ export class OfficeScene3D {
     });
   }
 
-  // ================================================================== room navigation panel (DOM)
-  private buildRoomPanel() {
-    const root = el("aside", "ov o3d-rooms");
-    root.id = "o3d-rooms-" + Math.random().toString(36).slice(2, 8);
-    root.setAttribute("aria-label", "Daftar ruangan");
-    const header = el("header"), title = el("h2"), icon = el("span", "o3d-rooms-icon", "🏢");
-    icon.setAttribute("aria-hidden", "true");
-    title.append(icon, document.createTextNode(" Ruangan"));
-    header.appendChild(title);
-    const body = el("div", "o3d-rooms-body");
-    const entries: HTMLButtonElement[] = [];
+  // ================================================================== roster tabs + room shortcuts (DOM)
+  private applyRosterTab() {
+    (Object.keys(this.tabs) as RosterTab[]).forEach((k) => {
+      const on = k === this.rosterTab, { btn, pane } = this.tabs[k];
+      btn.setAttribute("aria-selected", String(on));
+      btn.tabIndex = on ? 0 : -1;
+      pane.hidden = !on;
+    });
+  }
+  private setRosterTab(tab: RosterTab) {
+    if (tab === this.rosterTab) return;
+    this.rosterTab = tab;
+    try { localStorage.setItem(ROSTER_TAB_KEY, tab); } catch { /* storage unavailable */ }
+    this.applyRosterTab();
+  }
+  /** "Ruangan" tab body: rooms grouped per floor; click = fly to the room (switching floor if needed). */
+  private buildRoomList(idBase: string) {
+    const body = el("div", "room-list");
+    this.roomEntries = [];
     for (const floor of [1, 2] as const) {
       const sec = el("section"), label = el("p", "room-section-label", "Lantai " + floor), ul = el("ul");
-      label.id = root.id + "-l" + floor; ul.setAttribute("aria-labelledby", label.id);
+      label.id = idBase + "-l" + floor; ul.setAttribute("aria-labelledby", label.id);
       ROOMS.forEach((r, i) => {
         if (r.floor !== floor) return;
         const li = el("li"), b = el("button", "room-entry", r.name); b.type = "button";
         b.title = "Pindah kamera ke " + r.name + " (lantai " + floor + ")";
         b.addEventListener("click", () => this.goToRoom(i));
-        entries[i] = b; li.appendChild(b); ul.appendChild(li);
+        this.roomEntries[i] = b; li.appendChild(b); ul.appendChild(li);
       });
       sec.append(label, ul); body.appendChild(sec);
     }
-    root.append(header, body);
-    const toggle = el("button", "ov o3d-rooms-toggle"); toggle.type = "button";
-    toggle.setAttribute("aria-controls", root.id);
-    toggle.addEventListener("click", () => this.setRoomPanel(!this.roomPanelOpen));
-    this.host.append(root, toggle);
-    const rooms = { root, toggle, entries };
-    this.applyRoomPanel(rooms);
-    return rooms;
-  }
-  private applyRoomPanel(r = this.rooms) {
-    const open = this.roomPanelOpen;
-    r.root.classList.toggle("closed", !open);
-    r.root.toggleAttribute("inert", !open);
-    r.root.setAttribute("aria-hidden", open ? "false" : "true");
-    r.toggle.classList.toggle("closed", !open);
-    r.toggle.textContent = open ? "✕" : "🏢";
-    r.toggle.title = open ? "Sembunyikan daftar ruangan" : "Tampilkan daftar ruangan";
-    r.toggle.setAttribute("aria-label", r.toggle.title);
-    r.toggle.setAttribute("aria-expanded", String(open));
-  }
-  private setRoomPanel(open: boolean) {
-    if (open === this.roomPanelOpen) return;
-    this.roomPanelOpen = open;
-    try { localStorage.setItem(ROOM_PANEL_KEY, String(open)); } catch { /* storage unavailable */ }
-    this.applyRoomPanel();
+    return body;
   }
   /** Room shortcut: show the room's floor, then fly the camera to the room keeping the current heading. */
   private goToRoom(i: number) {
@@ -1301,8 +1316,8 @@ export class OfficeScene3D {
       if (d < bestD) { bestD = d; best = i; }
     });
     if (best === this.activeRoom) return;
-    this.rooms.entries[this.activeRoom]?.removeAttribute("aria-current");
-    this.rooms.entries[best]?.setAttribute("aria-current", "true");
+    this.roomEntries[this.activeRoom]?.removeAttribute("aria-current");
+    this.roomEntries[best]?.setAttribute("aria-current", "true");
     this.activeRoom = best;
   }
 
