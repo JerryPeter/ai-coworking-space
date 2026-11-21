@@ -22,7 +22,7 @@ export function TokenForm({ expired = false }: { expired?: boolean }) {
       const status = err instanceof ApiError ? err.status : -1;
       setError(
         status === 401 ? "Token rejected by the API (401). Check MISSION_CONTROL_V2_API_TOKEN in .env."
-          : status === 0 ? "Can't reach Mission Control API on :8742."
+          : status === 0 ? "Can't reach Agent Cockpit Control API on :8742."
           : `Unexpected response: ${(err as Error).message}`,
       );
     } finally {
@@ -35,7 +35,7 @@ export function TokenForm({ expired = false }: { expired?: boolean }) {
       <form className="token-card" onSubmit={submit} noValidate>
         <div className="row" style={{ gap: 10 }}>
           <span className="brand-mark"><Box size={16} /></span>
-          <span className="brand-name">Mission Control</span>
+          <span className="brand-name">Agent Cockpit Control</span>
           <span className="brand-tag">v2</span>
         </div>
         <div>

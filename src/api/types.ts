@@ -1,4 +1,4 @@
-// Response shapes of the Mission Control V2 API (from api/routers/*, verified against live data).
+// Response shapes of the Agent Cockpit Control API (from api/routers/*, verified against live data).
 
 export type GatewayStatus = "running" | "stopped" | "unknown";
 export type OfficeState = "working" | "reviewing" | "idle" | "offline" | "unknown";

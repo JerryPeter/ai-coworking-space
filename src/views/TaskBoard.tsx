@@ -65,7 +65,7 @@ export default function TaskBoard() {
     return (
       <div style={{ paddingTop: "12vh" }}>
         <EmptyState circle icon={<SquareKanban size={48} />} title="No tasks yet"
-          body={<InlineText text="Use `hermes kanban create` from the CLI to add tasks. Mission Control shows tasks from the shared Hermes kanban (read-only):" />}
+          body={<InlineText text="Use `hermes kanban create` from the CLI to add tasks. Agent Cockpit Control shows tasks from the shared Hermes kanban (read-only):" />}
           cli="hermes kanban create"
           foot={<>Reading ~/.hermes/kanban.db · checked {r.updatedAt ? relative(r.updatedAt, now) : "—"}</>} />
       </div>
