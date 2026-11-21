@@ -824,7 +824,7 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     bx(f, cw, 0.12, 0.08, "#1c1e21", ccx, cy0 + 0.38, z0 + cd + 0.06, false);
     // "JRRYPTR" letters standing on the canopy
     const lc = document.createElement("canvas"); lc.width = 2048; lc.height = 320;
-    { const x = lc.getContext("2d")!; x.clearRect(0, 0, 2048, 320); x.fillStyle = "#ffffff"; x.textAlign = "center"; x.textBaseline = "middle"; x.font = '800 250px "Plus Jakarta Sans", Arial, sans-serif'; x.fillText("JRRYPTR", 1024, 170); }
+    { const x = lc.getContext("2d")!; x.clearRect(0, 0, 2048, 320); x.fillStyle = "#ffffff"; x.textAlign = "center"; x.textBaseline = "middle"; x.font = '800 300px "Plus Jakarta Sans", Arial, sans-serif'; x.fillText("JRRYPTR", 1024, 170); }
     const ltex = new THREE.CanvasTexture(lc);
     const lw2 = 6.2, lh2 = (lw2 * 320) / 2048;
     for (let k2 = 0; k2 < 6; k2++) {
@@ -1343,20 +1343,40 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       for (const sx of [-1, 1]) { for (const sz of [-1, 1]) tire(o, wl, 0.34, 0.24, sx * 0.86, sz * 1.35); bx(o, 0.32, 0.12, 0.02, "#fff6c8", sx * 0.6, 0.66, -2.11, false); bx(o, 0.32, 0.12, 0.02, "#d33", sx * 0.6, 0.66, 2.11, false); }
       return o;
     };
-    const Bus = (c: string, wl: THREE.Mesh[]) => {
+    const BusTJ = (variant: "blue" | "orange", wl: THREE.Mesh[]) => {
+      // TransJakarta electric bus: blue = white body + blue roof/stripe/front; orange = full orange + darker skirt
       const o = G(); const L = 9.2, W = 2.4;
-      bx(o, W, 2.55, L, c, 0, 0.4, 0); bx(o, W + 0.02, 0.14, L + 0.02, "#f4f4f4", 0, 1.35, 0, false); bx(o, W - 0.1, 0.12, L - 0.2, "#d9dcdf", 0, 2.95, 0, false);
-      for (const sx of [-1, 1]) for (let i = 0; i < 6; i++) bx(o, 0.04, 0.85, 1.15, "#2a3a4c", sx * (W / 2 + 0.01), 1.6, -2.9 + i * 1.35, false);
-      bx(o, W - 0.3, 1.0, 0.04, "#2a3a4c", 0, 1.55, -L / 2 - 0.01, false); bx(o, W - 0.5, 0.6, 0.04, "#2a3a4c", 0, 1.8, L / 2 + 0.01, false);
-      bx(o, 0.04, 1.9, 0.9, "#2a3a4c", W / 2 + 0.02, 0.75, -3.7, false);
-      for (const sx of [-1, 1]) { for (const sz of [-3.0, 3.0]) tire(o, wl, 0.5, 0.3, sx * 1.08, sz); bx(o, 0.36, 0.16, 0.02, "#fff6c8", sx * 0.85, 0.75, -L / 2 - 0.02, false); bx(o, 0.36, 0.16, 0.02, "#d33", sx * 0.85, 0.75, L / 2 + 0.02, false); }
+      const blue = variant === "blue";
+      const bodyColor = blue ? "#f5f5f5" : "#E8520A";
+      const accentColor = blue ? "#0066CC" : "#C44308";
+      const roofColor = blue ? "#0066CC" : "#E8520A";
+      const frontColor = blue ? "#0066CC" : "#E8520A";
+      const darkColor = "#1a2a3a";
+      bx(o, W, 2.55, L, bodyColor, 0, 0.4, 0);                                   // main body (0.4..2.95)
+      bx(o, W, 0.35, L, roofColor, 0, 2.95, 0);                                  // roof (2.95..3.3)
+      bx(o, W + 0.02, 0.5, L + 0.02, accentColor, 0, 0.55, 0, false);            // stripe / skirt
+      for (const sx of [-1, 1]) bx(o, 0.04, 0.9, L - 0.5, darkColor, sx * (W / 2 + 0.01), 1.6, 0.1, false); // window strip
+      bx(o, W + 0.02, 2.9, 0.04, frontColor, 0, 0.4, -L / 2 - 0.01, false);      // front face (0.4..3.3)
+      bx(o, W - 0.4, 1.0, 0.04, darkColor, 0, 1.8, -L / 2 - 0.03, false);        // windshield
+      bx(o, W - 0.3, 1.2, 0.04, darkColor, 0, 1.55, L / 2 + 0.01, false);        // rear window
+      bx(o, 0.04, 2.0, 0.9, darkColor, W / 2 + 0.02, 0.75, -3.5, false);         // door (right side, front)
+      for (const sx of [-1, 1]) {
+        for (const sz of [-3.0, 3.0]) {
+          tire(o, wl, 0.5, 0.3, sx * 1.08, sz);
+          // silver rim on the outer face of each tyre
+          const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.04, 14), mat("#cfd3d8"));
+          rim.rotation.z = Math.PI / 2; rim.position.set(sx * (1.08 + 0.16), 0.5, sz); o.add(rim);
+        }
+        bx(o, 0.36, 0.16, 0.02, "#fff6c8", sx * 0.85, 0.75, -L / 2 - 0.04, false); // headlights
+        bx(o, 0.36, 0.16, 0.02, "#d33", sx * 0.85, 0.75, L / 2 + 0.03, false);     // taillights
+      }
       return o;
     };
     // [kind, colour, lane y (floor-plan px), start x (px)]; one speed per lane so nothing overtakes or overlaps.
     const LANE_SPEED: Record<number, number> = { 2385: 5.2, 2555: 4.4 };
-    ([["car", "#d0302a", 2385, -1200], ["bus", "#f2b705", 2385, 300], ["car", "#2f6fd0", 2385, 1900],
-      ["car", "#f2f2ef", 2555, 3200], ["bus", "#2e9e5b", 2555, 1700], ["car", "#9aa3ad", 2555, 100]] as const).forEach(([kind, col, ly, sx]) => {
-      const wl: THREE.Mesh[] = []; const v = kind === "bus" ? Bus(col, wl) : Car(col, wl); const dir = ly === 2385 ? 1 : -1;
+    ([["car", "#d0302a", 2385, -1200], ["bus", "blue", 2385, 300], ["car", "#2f6fd0", 2385, 1900],
+      ["car", "#f2f2ef", 2555, 3200], ["bus", "orange", 2555, 1700], ["car", "#9aa3ad", 2555, 100]] as const).forEach(([kind, col, ly, sx]) => {
+      const wl: THREE.Mesh[] = []; const v = kind === "bus" ? BusTJ(col as "blue" | "orange", wl) : Car(col, wl); const dir = ly === 2385 ? 1 : -1;
       add(g, v, wx(sx), wz(ly), dir > 0 ? -90 : 90, 0.03); vehicles.push({ p: v, dir, speed: LANE_SPEED[ly], wheels: wl, r: kind === "bus" ? 0.5 : 0.34 });
     });
     // guard & clouds
