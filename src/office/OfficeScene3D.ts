@@ -9,7 +9,7 @@
 //     waiting → Lantai 1 Lobby                                   offline → dimmed at own desk    unknown → own desk with "?"
 //   Agents walk there along a waypoint graph per floor and take the stairs between floors.
 // - Claude Code CLI = the orange (#F97316) faceted octahedron mascot, floating in the far south-west corner of the Lantai 2 agent work area.
-// - OpenCode = a dark 3-unit server stack with teal screens/LEDs against the Lantai 2 west wall, beside Claude Code.
+// - OpenCode = a dark, flat-shaded icosahedron orb with a dim teal glow beside Claude Code on Lantai 2.
 // - Right-hand agent roster + detail panel (DOM, Hermes "H" / OpenClaw "OC" badges, toggle button).
 // - Corner floor lamps that light up at night (setTimeOfDay → TownHall.setNight).
 //
@@ -110,7 +110,7 @@ interface Agent3D {
   dimmed?: boolean;
   /** Claude Code CLI is a tool, not a person: rendered as a floating energy orb instead of a body. */
   orb?: Orb;
-  /** OpenCode is an engine, not a person: rendered as a 3-unit server stack. */
+  /** OpenCode is an engine, not a person: rendered as a floating dark orb. */
   terminal?: Terminal;
 }
 /** One orbiting ember (units: orb radii, like the reference's R-relative maths). */
@@ -121,25 +121,28 @@ interface Tendril { a0: number; span: number; r0: number; shrink: number; speed:
 interface OrbLayer { geo: THREE.BufferGeometry; pos: Float32Array; col: Float32Array; size: Float32Array; back: THREE.Points; front: THREE.Points }
 interface Orb {
   state: ToolStatus; float: THREE.Group;
-  /** Orange (#F97316) flat-shaded Claude mascot. */
+  /** Flat-shaded Claude-style mascot. */
   mascot: THREE.Mesh<THREE.OctahedronGeometry, THREE.MeshStandardMaterial>;
   glow: THREE.Sprite; fx: THREE.Group; embers: Ember[]; tendrils: Tendril[]; emberLayer: OrbLayer; smokeLayer: OrbLayer;
   fxMats: THREE.ShaderMaterial[]; textures: THREE.Texture[]; light: THREE.PointLight;
   pulse: number; spin: number; time: number; tagClock: number;
 }
 interface Terminal {
-  /** One teal screen plane + one LED per stacked server unit (shared materials). */
-  screen: THREE.MeshBasicMaterial;
-  led: THREE.MeshStandardMaterial;
+  float: THREE.Group;
+  mesh: THREE.Mesh<THREE.IcosahedronGeometry, THREE.MeshStandardMaterial>;
+  glow: THREE.Sprite;
+  light: THREE.PointLight;
+  texture: THREE.Texture;
   state: OpenCodeState;
   time: number;
 }
+
 /** Claude CLI orb: floats in the empty south-west corner of the Lantai 2 "Area Kerja Agen" (floor-plan px 540, 950),
     clear of the agent pods (x 760-1200), the west wall (x 445) and the library wall (y 1070). */
 const ORB_POS = { x: wx(540), z: wz(950) };
-/** OpenCode server stack: flush against the Lantai 2 west wall (x 445), ~2.3u north-west of Claude, clear of the plants. */
+/** OpenCode orb: occupies its former Lantai 2 west-wall spot, beside Claude Code. */
 const OPENCODE_POS = { x: wx(468), z: wz(860) };
-const OPC_TEAL = 0x14B8A6, OPC_CHASSIS = 0x14201F;
+const OPC_TEAL = 0x14B8A6;
 const ORB_Y = 1.6;   // centre height above the floor (about a character's shoulder)
 const ORB_R = 0.5;   // mascot radius (1u across, roughly one character)
 const ORB_EMBERS = 80, ORB_TENDRILS = 16, ORB_SEG = 14;
@@ -366,7 +369,7 @@ export class OfficeScene3D {
     if (STATUS[status] && status !== prev) {
       d.status = status; a.since = Date.now(); a.lightMat.color.set(STATUS[status].color);
       if (a.orb) { this.applyOrb(a); this.deskGlow(a); }
-      else if (a.terminal) { this.applyTerminal(a); }
+      else if (a.terminal) this.applyTerminal(a);
       else {
         const s = this.pickSpot(a);
         if (s && s === a.spot && a.atSpot) { this.setPose(a, this.poseFor(a, s)); this.deskGlow(a); } else this.go(a, s);
@@ -384,7 +387,7 @@ export class OfficeScene3D {
     this.setAgentState(CLAUDE_AGENT_ID, status, "Claude Code CLI", label, { role: "Coding tool", color: CLAUDE_COLOR, desk: 4 });
   }
 
-  /** OpenCode engine is always visible as a Lantai 2 server stack; state comes from GET /api/agents/tools. */
+  /** OpenCode engine is always visible as a dark orb on Lantai 2; state comes from GET /api/agents/tools. */
   setOpenCodeState(state: OpenCodeState, label: string) {
     const status: AgentStatus = state === "working" ? "working" : state === "standby" ? "idle" : state === "offline" ? "offline" : "error";
     this.setAgentState(OPENCODE_AGENT_ID, status, "OpenCode", label, { role: "Terminal engine", color: OPENCODE_COLOR, desk: 10 });
@@ -661,41 +664,85 @@ export class OfficeScene3D {
   }
 
   private toolState(s: AgentStatus): ToolStatus { return s === "working" ? "working" : s === "idle" ? "idle" : "unknown"; }
-  /** OpenCode engine: 3 stacked dark server units (#14201F) against the west wall, each with a teal (#14B8A6)
-      screen plane and LED on its east face. offline = LEDs off + dark screens, standby = dim teal, working = bright pulse. */
+
+  /** OpenCode: a quiet, dark teal-glowing faceted orb; state comes from GET /api/agents/tools. */
   private buildTerminal(d: AgentData, deskIdx: number): Agent3D {
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
-    const chassis = new THREE.MeshLambertMaterial({ color: OPC_CHASSIS });
-    const screen = new THREE.MeshBasicMaterial({ color: 0x050909 });
-    const led = new THREE.MeshStandardMaterial({ color: 0x0b1413, emissive: OPC_TEAL, emissiveIntensity: 0, roughness: 0.4, metalness: 0 });
-    const screenGeo = this.geo("opcScreen", () => new THREE.PlaneGeometry(1.0, 0.3));
-    // Long side (2.0u) runs along the wall (z), depth 0.9u into the room (x); front face = +x. Total height 1.54u.
-    for (let k = 0; k < 3; k++) {
-      const y = k * 0.52;
-      this.box(body, 0.9, 0.5, 2.0, 0, y, 0, chassis);
-      const sc = new THREE.Mesh(screenGeo, screen); sc.rotation.y = Math.PI / 2; sc.position.set(0.452, y + 0.25, -0.25); body.add(sc);
-      this.box(body, 0.02, 0.08, 0.08, 0.46, y + 0.21, 0.7, led);
-    }
-    const hit = this.box(g, 1.0, 1.6, 2.1, 0, 0, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
-    const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
-    ring.rotation.x = -Math.PI / 2; ring.position.set(0.9, 0.04, 0); ring.visible = false; ring.renderOrder = 5; g.add(ring);
-    const tag = this.makeTag(g, 1.95), stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
+    const float = new THREE.Group(); float.position.y = ORB_Y; g.add(float);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x0f0f0f, emissive: OPC_TEAL, emissiveIntensity: 0.15,
+      roughness: 0.35, metalness: 0.6, flatShading: true,
+    });
+    const mesh = new THREE.Mesh(this.geo("opcOrb", () => new THREE.IcosahedronGeometry(ORB_R * 0.95, 1)), material);
+    mesh.renderOrder = 2; float.add(mesh);
+
+    const texture = gradientTexture(128, [[0, "rgba(20,184,166,0.6)"], [1, "rgba(20,184,166,0)"]]);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, opacity: 0.08 }));
+    glow.scale.setScalar(ORB_R * 2 * 1.8); glow.renderOrder = 1; float.add(glow);
+
+    // Never toggle light.visible: changing the light count recompiles scene materials.
+    const light = new THREE.PointLight(OPC_TEAL, 0, 3, 2); float.add(light);
+    const hit = this.box(g, 1.1, 1.3, 1.1, 0, ORB_Y - 0.65, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
+    const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; ring.renderOrder = 5; g.add(ring);
+    const tag = this.makeTag(g, ORB_Y + ORB_R + 0.45), stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
     const a: Agent3D = {
-      // lightMat is a throwaway: setAgentState recolours it per status, the teal LEDs are driven by applyTerminal.
-      data: d, group: g, body, lightMat: new THREE.MeshBasicMaterial(), shirt: chassis,
+      data: d, group: g, body, lightMat: new THREE.MeshBasicMaterial(), shirt: new THREE.MeshLambertMaterial(),
       legL: new THREE.Group(), legR: new THREE.Group(), armL: new THREE.Group(), armR: new THREE.Group(),
       book: hit, hit, ring, tag, zzz: stub, dots: stub, excl: stub,
       spot: null, path: [], floor: 2, lastNode: "hubW", pose: "stand", atSpot: true, deskIdx, since: null, phase: 0,
-      terminal: { screen, led, state: "unknown", time: 0 },
+      terminal: { float, mesh, glow, light, texture, state: "unknown", time: 0 },
     };
     hit.userData.agent = a;
     this.applyTerminal(a);
     this.drawTag(a);
     return a;
   }
+  private opcState(s: AgentStatus): OpenCodeState { return s === "working" ? "working" : s === "idle" ? "standby" : s === "offline" ? "offline" : "unknown"; }
+  private applyTerminal(a: Agent3D) {
+    const t = a.terminal!; t.state = this.opcState(a.data.status);
+    const material = t.mesh.material;
+    if (t.state === "working") {
+      material.color.setHex(0x0f0f0f); material.emissiveIntensity = 0.45;
+      (t.glow.material as THREE.SpriteMaterial).opacity = 0.18; t.light.intensity = 0.25;
+    } else if (t.state === "standby") {
+      material.color.setHex(0x0f0f0f); material.emissiveIntensity = 0.15;
+      (t.glow.material as THREE.SpriteMaterial).opacity = 0.08; t.light.intensity = 0;
+    } else {
+      material.color.setHex(0x0a0a0a); material.emissiveIntensity = 0;
+      (t.glow.material as THREE.SpriteMaterial).opacity = 0; t.light.intensity = 0;
+      t.float.position.y = ORB_Y; t.mesh.scale.setScalar(1);
+    }
+    this.dirty = true;
+  }
+  private stepTerminal(a: Agent3D, dt: number, _time: number) {
+    const t = a.terminal!, d = dt * (this.reduce ? 0.35 : 1);
+    t.time += d;
+    if (t.state === "working") {
+      const k = this.reduce ? 0.5 : 0.5 + 0.5 * Math.sin(t.time * 3);
+      t.mesh.rotation.y += d;
+      t.mesh.material.emissiveIntensity = 0.45 + 0.25 * k;
+      (t.glow.material as THREE.SpriteMaterial).opacity = 0.18 + 0.10 * k;
+      t.light.intensity = 0.25 + 0.2 * k;
+      t.mesh.scale.setScalar(1 + 0.04 * k);
+      t.float.position.y = ORB_Y + (this.reduce ? 0 : Math.sin(t.time * 2.4) * 0.08);
+    } else if (t.state === "standby") {
+      t.mesh.rotation.y += d * 0.25;
+      t.mesh.material.emissiveIntensity = 0.15;
+      (t.glow.material as THREE.SpriteMaterial).opacity = 0.08;
+      t.light.intensity = 0;
+      t.mesh.scale.setScalar(1);
+      t.float.position.y = ORB_Y + (this.reduce ? 0 : Math.sin(t.time * 1.25) * 0.04);
+    } else {
+      t.mesh.rotation.y = 0; t.mesh.scale.setScalar(1);
+      t.float.position.y = ORB_Y;
+      t.mesh.material.color.setHex(0x0a0a0a); t.mesh.material.emissiveIntensity = 0;
+      (t.glow.material as THREE.SpriteMaterial).opacity = 0; t.light.intensity = 0;
+    }
+  }
 
-  /** Claude Code CLI: an orange (#F97316) flat-shaded octahedron mascot with a back glow, smoke tendrils +
-      orbiting embers (drawn behind and in front of it), and a warm point light. */
+  /** Claude Code CLI: an orange (#F97316) flat-shaded octahedron mascot with glow and orbiting embers. */
   private buildOrb(d: AgentData, deskIdx: number): Agent3D {
     this.hookShaderErrors();
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
@@ -708,7 +755,7 @@ export class OfficeScene3D {
     const mascot = new THREE.Mesh(this.geo("claudeMascot", () => new THREE.OctahedronGeometry(ORB_R * 1.05, 1)), mascotMat);
     mascot.rotation.z = Math.PI / 4; mascot.rotation.x = 0.12; mascot.renderOrder = 2; float.add(mascot);
 
-    // Back glow ("pendaran"): reference gradient from 0.85 R to 2.1 R.
+    // Back glow keeps the Claude-style silhouette.
     const glowTex = gradientTexture(128, [[0, "rgba(253,186,116,1)"], [0.45, "rgba(249,115,22,0.37)"], [1, "rgba(180,83,9,0)"]], 0.85 / 2.1);
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, opacity: 0.3 }));
     glow.scale.setScalar(ORB_R * 2 * 2.1); glow.renderOrder = 1; float.add(glow);
@@ -767,23 +814,8 @@ export class OfficeScene3D {
     this.drawTag(a);
     return a;
   }
-  private opcState(s: AgentStatus): OpenCodeState { return s === "working" ? "working" : s === "idle" ? "standby" : s === "offline" ? "offline" : "unknown"; }
-  /** offline/unknown: LEDs off, screens dark. standby: dim teal (LED emissive 0.4). working: bright, pulsed in stepTerminal. */
-  private applyTerminal(a: Agent3D) {
-    const t = a.terminal!; t.state = this.opcState(a.data.status);
-    t.led.emissiveIntensity = t.state === "working" ? 1.2 : t.state === "standby" ? 0.4 : 0;
-    t.led.color.set(t.state === "offline" || t.state === "unknown" ? 0x0b1413 : 0x0f2a27);
-    t.screen.color.set(t.state === "working" ? OPC_TEAL : t.state === "standby" ? 0x0d5c54 : 0x050909);
-    this.dirty = true;
-  }
-  private stepTerminal(a: Agent3D, dt: number, _time: number) {
-    const t = a.terminal!; t.time += dt;
-    if (t.state !== "working" || this.reduce) return;
-    const k = 0.5 + 0.5 * Math.sin(t.time * 4);
-    t.led.emissiveIntensity = 0.8 + 0.8 * k; // 0.8 .. 1.6
-    t.screen.color.setHex(OPC_TEAL).multiplyScalar(0.8 + 0.2 * k);
-  }
-  /** Route GL compile/link errors: a failing Claude particle shader hides the particle layers (the mascot mesh stays). */
+
+  /** Route GL compile/link errors: a failing orb particle shader hides the particle layers (the mascot mesh stays). */
   private hookShaderErrors() {
     if (this.renderer.debug.onShaderError) return;
     this.renderer.debug.onShaderError = (gl, program, vs, fs) => {
@@ -876,14 +908,13 @@ export class OfficeScene3D {
     const a = this.buildAgent(d, desk);
     a.tag.el.addEventListener("click", () => { this.select(a.data.id); this.opts.onSelect?.(a.data.id); });
     this.agents.push(a); this.byId.set(id, a);
-    if (a.orb) { // floats in the Lantai 2 work-area corner; never walks. Its desk stays reserved (screen glows while working).
+    if (a.orb) { // Claude CLI floats in the Lantai 2 work-area corner; its desk stays reserved.
       const ds = this.spots.filter((x) => x.use[0] === "desk"), s = ds[a.deskIdx % ds.length];
       this.claim(a, s); a.floor = 2; this.th.floors[2].add(a.group);
       a.group.position.set(ORB_POS.x, FT, ORB_POS.z); a.atSpot = true; this.deskGlow(a);
     } else if (a.terminal) {
-      // Keep the engine beside Claude, independent of agent desks and room occupancy.
       a.floor = 2; this.th.floors[2].add(a.group);
-      a.group.position.set(OPENCODE_POS.x, FT, OPENCODE_POS.z); a.atSpot = true; this.applyTerminal(a);
+      a.group.position.set(OPENCODE_POS.x, FT, OPENCODE_POS.z); a.atSpot = true;
     } else {
       const s = this.pickSpot(a);
       if (s) this.place(a, s);
@@ -900,7 +931,7 @@ export class OfficeScene3D {
     a.tag.el.remove();
     a.group.traverse((o) => {
       const m = o as THREE.Mesh;
-      if ((o as THREE.Sprite).isSprite) { const sm = m.material as THREE.SpriteMaterial; sm.map?.dispose(); sm.dispose(); }
+      if ((o as THREE.Sprite).isSprite && !(a.terminal && o === a.terminal.glow)) { const sm = m.material as THREE.SpriteMaterial; sm.map?.dispose(); sm.dispose(); }
     });
     const dimShirt = this.dimMats.get(a.shirt); if (dimShirt) { dimShirt.dispose(); this.dimMats.delete(a.shirt); }
     a.shirt.dispose(); a.lightMat.dispose(); (a.ring.material as THREE.Material).dispose();
@@ -909,7 +940,11 @@ export class OfficeScene3D {
       [o.mascot.material, ...o.fxMats].forEach((m) => m.dispose());
       o.textures.forEach((t) => t.dispose()); o.emberLayer.geo.dispose(); o.smokeLayer.geo.dispose(); o.light.dispose();
     }
-    if (a.terminal) { a.terminal.screen.dispose(); a.terminal.led.dispose(); }
+    if (a.terminal) {
+      a.terminal.mesh.material.dispose();
+      (a.terminal.glow.material as THREE.SpriteMaterial).dispose();
+      a.terminal.texture.dispose();
+    }
     this.agents = this.agents.filter((x) => x !== a); this.byId.delete(a.data.id);
     if (this.selected === a) this.selected = null;
     this.dirty = true;
