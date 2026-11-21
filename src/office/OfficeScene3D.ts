@@ -53,7 +53,9 @@ function capLabel(name: string): string {
 }
 
 export const CLAUDE_AGENT_ID = "claude_cli";
+export const OPENCODE_AGENT_ID = "opencode_engine";
 const CLAUDE_COLOR = "#F97316";
+const OPENCODE_COLOR = "#F5E6D3";
 
 /** Extra per-agent info pushed with each state update. All optional; missing → "–". */
 export interface AgentMeta {
@@ -131,6 +133,8 @@ interface Terminal {
 /** Claude CLI orb: floats in the empty south-west corner of the Lantai 2 "Area Kerja Agen" (floor-plan px 540, 950),
     clear of the agent pods (x 760-1200), the west wall (x 445) and the library wall (y 1070). */
 const ORB_POS = { x: wx(540), z: wz(950) };
+/** OpenCode terminal, placed immediately east of Claude's Lantai 2 appliance. */
+const OPENCODE_POS = { x: wx(650), z: wz(950) };
 const ORB_Y = 1.6;   // centre height above the floor (about a character's shoulder)
 const ORB_R = 0.5;   // glass sphere radius (1u across, roughly one character)
 const ORB_EMBERS = 80, ORB_TENDRILS = 16, ORB_SEG = 14;
@@ -458,6 +462,7 @@ export class OfficeScene3D {
     if (STATUS[status] && status !== prev) {
       d.status = status; a.since = Date.now(); a.lightMat.color.set(STATUS[status].color);
       if (a.orb) { this.applyOrb(a); this.deskGlow(a); }
+      else if (a.terminal) { this.applyTerminal(a); }
       else {
         const s = this.pickSpot(a);
         if (s && s === a.spot && a.atSpot) { this.setPose(a, this.poseFor(a, s)); this.deskGlow(a); } else this.go(a, s);
@@ -473,6 +478,12 @@ export class OfficeScene3D {
   setRobotState(state: ToolStatus, label: string) {
     const status: AgentStatus = state === "working" ? "working" : state === "idle" ? "idle" : "offline";
     this.setAgentState(CLAUDE_AGENT_ID, status, "Claude Code CLI", label, { role: "Coding tool", color: CLAUDE_COLOR, desk: 4 });
+  }
+
+  /** OpenCode engine is always visible as a Lantai 2 terminal; telemetry is optional. */
+  setOpenCodeState(state: ToolStatus, label: string) {
+    const status: AgentStatus = state === "working" ? "working" : state === "idle" ? "idle" : "error";
+    this.setAgentState(OPENCODE_AGENT_ID, status, "OpenCode", label, { role: "Terminal engine", color: OPENCODE_COLOR, desk: 10 });
   }
 
   /** Remove every agent whose id is not in `ids` (e.g. a profile that disappeared from the API). */
@@ -708,6 +719,7 @@ export class OfficeScene3D {
 
   private buildAgent(d: AgentData, deskIdx: number): Agent3D {
     if (d.id === CLAUDE_AGENT_ID) return this.buildOrb(d, deskIdx);
+    if (d.id === OPENCODE_AGENT_ID) return this.buildTerminal(d, deskIdx);
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
     const sm = new THREE.MeshLambertMaterial({ color: d.color }), skin = SKINS[deskIdx % SKINS.length], hair = HAIRS[(deskIdx * 5 + 2) % HAIRS.length];
     this.box(body, 0.44, 0.48, 0.26, 0, 0.45, 0, sm);
@@ -747,6 +759,34 @@ export class OfficeScene3D {
   private toolState(s: AgentStatus): ToolStatus { return s === "working" ? "working" : s === "idle" ? "idle" : "unknown"; }
   /** Claude Code CLI as the clay/glass orb from the reference: a camera-facing shader billboard, back glow,
       smoke tendrils + orbiting embers (drawn behind and in front of the glass), and a warm point light. */
+  /** OpenCode server/terminal appliance: a compact rack with a glowing terminal face. */
+  private buildTerminal(d: AgentData, deskIdx: number): Agent3D {
+    const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
+    const chassis = new THREE.MeshLambertMaterial({ color: "#29252a" });
+    const screen = new THREE.MeshLambertMaterial({ color: "#221d1d", emissive: "#d97757", emissiveIntensity: 0.45 });
+    const led = new THREE.MeshBasicMaterial({ color: "#f2a91e" });
+    this.box(body, 0.82, 0.92, 0.58, 0, 0.08, 0, chassis);
+    this.box(body, 0.62, 0.38, 0.02, 0, 0.42, -0.30, screen);
+    this.box(body, 0.46, 0.025, 0.018, 0, 0.56, -0.315, led);
+    this.box(body, 0.06, 0.06, 0.025, -0.28, 0.20, -0.315, led);
+    this.box(body, 0.06, 0.06, 0.025, -0.18, 0.20, -0.315, led);
+    this.box(body, 0.62, 0.04, 0.58, 0, 1.00, 0, "#40383c");
+    const hit = this.box(g, 1.05, 1.25, 0.9, 0, 0, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
+    const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; ring.renderOrder = 5; g.add(ring);
+    const tag = this.makeTag(g, 1.55), stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
+    const a: Agent3D = {
+      data: d, group: g, body, lightMat: led, shirt: chassis,
+      legL: new THREE.Group(), legR: new THREE.Group(), armL: new THREE.Group(), armR: new THREE.Group(),
+      book: hit, hit, ring, tag, zzz: stub, dots: stub, excl: stub,
+      spot: null, path: [], floor: 2, lastNode: "hubW", pose: "stand", atSpot: true, deskIdx, since: null, phase: 0,
+      terminal: { screen, led, time: 0 },
+    };
+    hit.userData.agent = a;
+    this.drawTag(a);
+    return a;
+  }
+
   private buildOrb(d: AgentData, deskIdx: number): Agent3D {
     this.hookShaderErrors();
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
@@ -828,6 +868,20 @@ export class OfficeScene3D {
     this.stepOrb(a, 0, 0); // fill the particle buffers before the first render
     this.drawTag(a);
     return a;
+  }
+  private applyTerminal(a: Agent3D) {
+    const t = a.terminal!;
+    t.screen.emissiveIntensity = a.data.status === "working" ? 1.1 : a.data.status === "error" ? 0.15 : 0.45;
+    t.led.color.set(a.data.status === "working" ? "#2fbf71" : a.data.status === "error" ? "#ef4b4b" : "#f2a91e");
+    this.dirty = true;
+  }
+  private stepTerminal(a: Agent3D, dt: number, time: number) {
+    const t = a.terminal!; t.time += dt;
+    if (a.data.status === "working") {
+      t.screen.emissiveIntensity = 0.85 + Math.sin(t.time * 7) * 0.25;
+      t.led.color.set(Math.sin(t.time * 5) > 0 ? "#2fbf71" : "#8ee8ad");
+    }
+    a.body.rotation.y = Math.sin(time * 0.35) * 0.04;
   }
   /** Route GL compile/link errors: a failing orb shader swaps to a plain glowing disc instead of rendering nothing. */
   private hookShaderErrors() {
@@ -935,6 +989,10 @@ export class OfficeScene3D {
       const ds = this.spots.filter((x) => x.use[0] === "desk"), s = ds[a.deskIdx % ds.length];
       this.claim(a, s); a.floor = 2; this.th.floors[2].add(a.group);
       a.group.position.set(ORB_POS.x, FT, ORB_POS.z); a.atSpot = true; this.deskGlow(a);
+    } else if (a.terminal) {
+      // Keep the engine beside Claude, independent of agent desks and room occupancy.
+      a.floor = 2; this.th.floors[2].add(a.group);
+      a.group.position.set(OPENCODE_POS.x, FT, OPENCODE_POS.z); a.atSpot = true; this.applyTerminal(a);
     } else {
       const s = this.pickSpot(a);
       if (s) this.place(a, s);
@@ -1091,6 +1149,7 @@ export class OfficeScene3D {
   }
   private locText(a: Agent3D) {
     if (a.orb) return "Area Kerja Agen, lantai 2";
+    if (a.terminal) return "Area Kerja Agen · OpenCode, lantai 2";
     // Seat-holders (e.g. Hawa → Ruang COO) get their room from the spot itself: "Ruang COO, lantai 2".
     const s = a.spot; if (!s) return "–";
     return (a.atSpot ? "" : "Menuju ") + s.room + ", lantai " + s.floor;
@@ -1167,8 +1226,9 @@ export class OfficeScene3D {
       if (a.data.status === "offline") b.classList.add("o3d-off");
       const st = el("i"); st.style.background = STATUS[a.data.status].color; av.appendChild(st);
       const oc = a.data.id.startsWith("openclaw:");
-      const fw = el("span", "o3d-fw " + (oc ? "badge-openclaw" : "badge-hermes"), oc ? "OC" : "H");
-      fw.title = oc ? "OpenClaw agent" : "Hermes agent";
+      const engine = !!a.terminal;
+      const fw = el("span", "o3d-fw " + (engine ? "badge-opencode" : oc ? "badge-openclaw" : "badge-hermes"), engine ? "OC" : oc ? "OC" : "H");
+      fw.title = engine ? "OpenCode engine" : oc ? "OpenClaw agent" : "Hermes agent";
       const nm = el("span", "o3d-name"); nm.append(fw, el("span", "truncate", capLabel(a.data.name)));
       const who = el("span", "o3d-who"); who.appendChild(nm);
       const sm = el("small", "", STATUS[a.data.status].label); sm.style.color = STATUS[a.data.status].color; who.appendChild(sm);
@@ -1288,7 +1348,7 @@ export class OfficeScene3D {
       if (k >= 1) this.tween = null;
     }
     this.controls.update();
-    for (const a of this.agents) { if (a.orb) this.stepOrb(a, dt, t); else this.stepAgent(a, dt, t); }
+    for (const a of this.agents) { if (a.orb) this.stepOrb(a, dt, t); else if (a.terminal) this.stepTerminal(a, dt, t); else this.stepAgent(a, dt, t); }
     this.detailClock += dt;
     if (this.detailClock > 1) { this.detailClock = 0; if (this.selected) this.renderDetail(); }
     if (this.dirty) { this.dirty = false; this.renderRoster(); }

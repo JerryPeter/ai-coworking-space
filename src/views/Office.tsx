@@ -13,7 +13,7 @@ import { StatusBadge } from "../components/ui/StatusBadge";
 import { officeBadge, toolBadge } from "../lib/derive";
 import { setParams, useRoute } from "../lib/router";
 import { relative, useNow } from "../lib/time";
-import { CLAUDE_AGENT_ID, OfficeScene3D, STATUS, webglAvailable, type AgentStatus, type Preset } from "../office/OfficeScene3D";
+import { CLAUDE_AGENT_ID, OPENCODE_AGENT_ID, OfficeScene3D, STATUS, webglAvailable, type AgentStatus, type Preset } from "../office/OfficeScene3D";
 import { MODE_KEY, readMode, readTod, readVisual, store, TOD_KEY, VISUAL_KEY, type TimeOfDay, type VisualPrefs } from "../office/palettes";
 import { identity, rosterIndex } from "../theme/agents";
 
@@ -155,6 +155,9 @@ export default function Office() {
       });
       s.setRobotState(data.claude_tool?.state ?? "unknown", data.claude_tool?.detail ?? "");
       ids.push(CLAUDE_AGENT_ID);
+      // OpenCode is a visual engine marker until a dedicated process feed is available.
+      s.setOpenCodeState("unknown", "Engine OpenCode · telemetry belum tersedia");
+      ids.push(OPENCODE_AGENT_ID);
     } else ids.push(...s.agentIds().filter((id) => !id.startsWith("openclaw:")));
     if (ocData) {
       const ocRank = (n: string) => { const i = OPENCLAW_ORDER.indexOf(n); return i < 0 ? 99 : i; };
@@ -190,6 +193,9 @@ export default function Office() {
       ...(data ? [{
         key: CLAUDE_AGENT_ID, name: "Claude Code CLI", zone: ZONE[toolStatus(data.claude_tool?.state)],
         badge: <StatusBadge status={toolBadge(data.claude_tool?.state)} />, reason: data.claude_tool?.detail ?? "–",
+      }, {
+        key: OPENCODE_AGENT_ID, name: "OpenCode", zone: "Lantai 2 · Area Kerja Agen",
+        badge: <span className="xs">Engine</span>, reason: "Visualisasi terminal · telemetry belum tersedia",
       }] : []),
       ...(ocData?.agents ?? []).map((a) => {
         const st = openclawStatus(a, now);
