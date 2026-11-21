@@ -32,6 +32,7 @@ const STYLES = [{ v: 1, label: "Style 1" }, { v: 2, label: "Style 2" }, { v: 3, 
 // reference's SHIRTS palette, chosen to stay distinct from the Hermes + Claude colours.
 const OPENCLAW_ORDER = ["chief", "researcher", "writer", "reviewer"];
 const OPENCLAW_COLOR: Record<string, string> = { chief: "#e2a91a", researcher: "#22a3b3", writer: "#2f9e6f", reviewer: "#6b7785" };
+const OPENCLAW_ROLE: Record<string, string> = { chief: "chief", researcher: "researcher", writer: "writer", reviewer: "reviewer" };
 const OPENCLAW_FALLBACK = ["#e4572e", "#3d7fd9", "#8a5cd0", "#d9488f"];
 const OPENCLAW_RECENT_MS = 30 * 60_000; // last run within 30 min → "break", else idle
 const ocId = (name: string) => `openclaw:${name}`;
@@ -178,7 +179,7 @@ export default function Office() {
       [...ocData.agents].sort((a, b) => ocRank(a.name) - ocRank(b.name)).forEach((a, i) => {
         const oi = OPENCLAW_ORDER.indexOf(a.name);
         s.setAgentState(ocId(a.name), openclawStatus(a, now), a.display_name || a.name, null, {
-          role: a.theme ? `${a.theme} (OpenClaw)` : "OpenClaw agent",
+          role: OPENCLAW_ROLE[a.name] ?? "openclaw",
           color: OPENCLAW_COLOR[a.name] ?? OPENCLAW_FALLBACK[i % OPENCLAW_FALLBACK.length],
           desk: oi >= 0 ? 5 + oi : undefined,
           lastActive: a.last_run_at,
