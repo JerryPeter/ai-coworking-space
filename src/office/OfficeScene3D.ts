@@ -137,14 +137,9 @@ interface Terminal {
   time: number;
 }
 
-/** Engine orbs (radius 25 px) as a symmetric pair on Lantai 2 "Area Kerja Agen" (x 445-1379, centre x=912), both at y=800
-    (the aisle between the pod rows). 539 + 1285 = 2 × 912. The requested 475/1340 collided: 475 leaves 1 px to the west wall,
-    and 1340 sits on the cooA→cooB walk path (x=1350, y 500-1000) next to the x=1379 wall corner.
-    Claude CLI orb (west): 65 px clear of the west wall (inner face x≈449), >140 px from the west pods, 107 px from the sconce (453, 700). */
+// Claude orb (kiri) dan OpenCode orb (kanan orb, kiri ruang kerja), jarak pusat 1.62u
 const ORB_POS = { x: wx(539), z: wz(800) };
-/** OpenCode orb (east, mirror of ORB_POS around x=912): 40 px clear of the walk path (x=1350), 69 px from the wall corner (1379, 803),
-    ~30-37 px in plan from the east pod chairs (whose 1.0 m tops sit below the orb's 1.1 m underside), 64 px from the floor lamp (1325, 880). */
-const OPENCODE_POS = { x: wx(1285), z: wz(800) };
+const OPENCODE_POS = { x: wx(620), z: wz(800) };
 const OPC_TEAL = 0x14B8A6;
 const ORB_Y = 1.6;   // centre height above the floor (about a character's shoulder)
 const ORB_R = 0.5;   // mascot radius (1u across, roughly one character)
@@ -689,7 +684,7 @@ export class OfficeScene3D {
     const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)),
       new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; ring.renderOrder = 5; g.add(ring);
-    const tag = this.makeTag(g, ORB_Y + ORB_R + 0.45), stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
+    const tag = this.makeTag(g, ORB_Y + ORB_R + 0.45 + 0.7), stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
     const a: Agent3D = {
       data: d, group: g, body, lightMat: new THREE.MeshBasicMaterial(), shirt: new THREE.MeshLambertMaterial(),
       legL: new THREE.Group(), legR: new THREE.Group(), armL: new THREE.Group(), armR: new THREE.Group(),
