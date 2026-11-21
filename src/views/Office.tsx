@@ -2,6 +2,7 @@
 // so only this view pays for Three.js. REAL data only, no simulation:
 // - /api/office/state every 5 s → Hermes agents + Claude Code CLI
 // - /api/openclaw/agents every 15 s → OpenClaw team (chief / researcher / writer / reviewer)
+// - /api/agents/tools every 5 s → OpenCode engine state (working / standby / offline)
 // The scene owns its own roster + detail panel (right side); clicking a Hermes agent or Claude CLI
 // also opens the AgentDrawer via ?agent=<id>. OpenClaw agents have no drawer yet.
 import { House, Minus, Moon, Plus, RotateCw, SlidersHorizontal, Sun, Tag } from "lucide-react";
@@ -13,7 +14,7 @@ import { StatusBadge } from "../components/ui/StatusBadge";
 import { officeBadge, toolBadge } from "../lib/derive";
 import { setParams, useRoute } from "../lib/router";
 import { relative, useNow } from "../lib/time";
-import { CLAUDE_AGENT_ID, OPENCODE_AGENT_ID, OfficeScene3D, STATUS, webglAvailable, type AgentStatus, type Preset } from "../office/OfficeScene3D";
+import { CLAUDE_AGENT_ID, OPENCODE_AGENT_ID, OfficeScene3D, STATUS, webglAvailable, type AgentStatus, type OpenCodeState, type Preset } from "../office/OfficeScene3D";
 import { MODE_KEY, readMode, readTod, readVisual, store, TOD_KEY, VISUAL_KEY, type TimeOfDay, type VisualPrefs } from "../office/palettes";
 import { identity, rosterIndex } from "../theme/agents";
 
@@ -56,12 +57,24 @@ const ZONE: Record<AgentStatus, string> = {
   offline: "Lantai 1 · Ruang Kerja (meja sendiri, redup)", error: "Lantai 1 · Ruang Kerja (status tidak diketahui)",
 };
 const toolStatus = (s: ToolState | undefined): AgentStatus => (s === "working" ? "working" : s === "idle" ? "idle" : "offline");
+/** OpenCode entry of GET /api/agents/tools (state is working|standby|offline; anything else → unknown). */
+const OPC_STATES: readonly OpenCodeState[] = ["working", "standby", "offline"];
+const OPC_LABEL: Record<OpenCodeState, string> = { working: "Bekerja", standby: "Standby", offline: "Offline", unknown: "Tidak diketahui" };
+const OPC_DOT: Record<OpenCodeState, string> = { working: "#14B8A6", standby: "#0d7f74", offline: "#7b8794", unknown: "#ef4b4b" };
+function openCodeTool(tools: { name: string; state: string; detail: string | null }[] | undefined): { state: OpenCodeState; detail: string } {
+  const t = tools?.find((x) => x.name === "OpenCode");
+  if (!t) return { state: "unknown", detail: tools ? "OpenCode tidak ada di /api/agents/tools" : "Memuat status OpenCode…" };
+  const state = (OPC_STATES as readonly string[]).includes(t.state) ? (t.state as OpenCodeState) : "unknown";
+  return { state, detail: t.detail ?? "" };
+}
 const hermesTask = (a: OfficeAgent) => a.current_task?.title || a.last_activity || null;
 const known = (v: string) => (v === "Not Available" ? null : v);
 
 export default function Office() {
   const office = useApi(endpoints.office, 5_000);
   const oc = useApi(endpoints.openclaw, 15_000);
+  const tools = useApi(endpoints.tools, 5_000);
+  const opc = openCodeTool(tools.data?.tools);
   const { params } = useRoute();
   const now = useNow(5_000);
   const host = useRef<HTMLDivElement>(null);
@@ -153,10 +166,11 @@ export default function Office() {
         });
         ids.push(a.name);
       });
-      s.setRobotState(data.claude_tool?.state ?? "unknown", data.claude_tool?.detail ?? "");
+      const claudeState = data.claude_tool?.state === "working" || data.claude_tool?.state === "idle"
+        ? data.claude_tool.state : "unknown";
+      s.setRobotState(claudeState, data.claude_tool?.detail ?? "");
       ids.push(CLAUDE_AGENT_ID);
-      // OpenCode is a visual engine marker until a dedicated process feed is available.
-      s.setOpenCodeState("unknown", "Engine OpenCode · telemetry belum tersedia");
+      s.setOpenCodeState(opc.state, opc.detail);
       ids.push(OPENCODE_AGENT_ID);
     } else ids.push(...s.agentIds().filter((id) => !id.startsWith("openclaw:")));
     if (ocData) {
@@ -174,7 +188,7 @@ export default function Office() {
       });
     } else ids.push(...s.agentIds().filter((id) => id.startsWith("openclaw:")));
     s.retainAgents(ids);
-  }, [data, ocData, ready, now]);
+  }, [data, ocData, ready, now, opc.state, opc.detail]);
 
   // ?focus=<id> (from "Open in 3D Office"): fly to the character once the scene is up.
   useEffect(() => {
@@ -195,7 +209,7 @@ export default function Office() {
         badge: <StatusBadge status={toolBadge(data.claude_tool?.state)} />, reason: data.claude_tool?.detail ?? "–",
       }, {
         key: OPENCODE_AGENT_ID, name: "OpenCode", zone: "Lantai 2 · Area Kerja Agen",
-        badge: <span className="xs">Engine</span>, reason: "Visualisasi terminal · telemetry belum tersedia",
+        badge: <span className="xs">{OPC_LABEL[opc.state]}</span>, reason: opc.detail || "–",
       }] : []),
       ...(ocData?.agents ?? []).map((a) => {
         const st = openclawStatus(a, now);
@@ -243,6 +257,12 @@ export default function Office() {
               <button key={String(p)} aria-pressed={preset === p} title={title} onClick={() => { setPreset(p); scene.current?.preset(p); }}>{label}</button>
             ))}
           </div>
+          <span className="ov-sep" aria-hidden="true" />
+          <span className="xs" role="status" title={`OpenCode · ${OPC_LABEL[opc.state]}${opc.detail ? ` · ${opc.detail}` : ""}`}
+            aria-label={`OpenCode ${OPC_LABEL[opc.state]}`}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 7px", borderRadius: 4, fontWeight: 700, background: "#14201F", color: "#5eead4" }}>
+            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: OPC_DOT[opc.state] }} />OPC
+          </span>
           <span className="ov-sep" aria-hidden="true" />
           <div className="segmented">
             <button ref={popBtn} className="icon" aria-pressed={popOpen} aria-expanded={popOpen} aria-controls="th-visual-pop" aria-label="Pengaturan visual" title="Pengaturan visual"

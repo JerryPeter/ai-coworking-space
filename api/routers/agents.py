@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from api.sources.claude_tool import TOOL_NAME, scan_claude_tool
 from api.sources.common import list_profiles
+from api.sources.opencode import TOOL_NAME as OPENCODE_TOOL_NAME, scan_opencode
 from api.sources.profiles import agent_info
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -20,16 +21,24 @@ def list_agents() -> dict:
 
 @router.get("/tools")
 def list_tools() -> dict:
-    """Non-profile office entities. Currently only Claude Code CLI (live `claude -p` processes)."""
-    scan = scan_claude_tool()
+    """Non-profile office entities detected from live process state."""
+    claude = scan_claude_tool()
+    opencode = scan_opencode()
     return {
         "tools": [{
             "name": TOOL_NAME,
             "kind": "tool",
-            "state": scan["state"],
-            "process_count": scan["process_count"],
-            "pids": scan["pids"],
-            "detail": scan["detail"],
+            "state": claude["state"],
+            "process_count": claude["process_count"],
+            "pids": claude["pids"],
+            "detail": claude["detail"],
+        }, {
+            "name": OPENCODE_TOOL_NAME,
+            "kind": "tool",
+            "state": opencode["state"],
+            "process_count": opencode["process_count"],
+            "pids": opencode["pids"],
+            "detail": opencode["detail"],
         }],
-        "source": "process scan of /proc/*/cmdline (argv match: claude ... -p|--print)",
+        "source": "read-only process scan of /proc/*/cmdline (Claude Code CLI and OpenCode)",
     }

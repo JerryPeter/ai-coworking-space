@@ -2,7 +2,7 @@
 
 export type GatewayStatus = "running" | "stopped" | "unknown";
 export type OfficeState = "working" | "reviewing" | "idle" | "offline" | "unknown";
-export type ToolState = "working" | "idle" | "unknown";
+export type ToolState = "working" | "idle" | "standby" | "offline" | "unknown";
 
 export interface Agent {
   name: string;

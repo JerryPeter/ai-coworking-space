@@ -8,8 +8,8 @@
 //     idle    → Lantai 2 Perpustakaan & Lounge / Coffee Corner   break (OpenClaw recent run) → Lantai 3 Ruang Game / Tempat Istirahat
 //     waiting → Lantai 1 Lobby                                   offline → dimmed at own desk    unknown → own desk with "?"
 //   Agents walk there along a waypoint graph per floor and take the stairs between floors.
-// - Claude Code CLI = the clay/glass WebGL shader orb, floating in the far south-west corner of the Lantai 2 agent work area.
-// - OpenCode = a terminal/server appliance beside Claude Code, also on Lantai 2.
+// - Claude Code CLI = the orange (#F97316) faceted octahedron mascot, floating in the far south-west corner of the Lantai 2 agent work area.
+// - OpenCode = a dark 3-unit server stack with teal screens/LEDs against the Lantai 2 west wall, beside Claude Code.
 // - Right-hand agent roster + detail panel (DOM, Hermes "H" / OpenClaw "OC" badges, toggle button).
 // - Corner floor lamps that light up at night (setTimeOfDay → TownHall.setNight).
 //
@@ -27,6 +27,8 @@ export type { TimeOfDay, FloorMode, Scope, StyleNo, Weather };
 export type Preset = FloorMode;
 export type AgentStatus = "working" | "meeting" | "waiting" | "idle" | "break" | "offline" | "error";
 export type ToolStatus = "working" | "idle" | "unknown";
+/** OpenCode engine state from api/sources/opencode.py ("unknown" = no feed / scan failed). */
+export type OpenCodeState = "working" | "standby" | "offline" | "unknown";
 type Pose = "stand" | "sit" | "type" | "read" | "game" | "lie" | "lean" | "play" | "walk";
 type FloorNo = 1 | 2 | 3;
 
@@ -55,7 +57,7 @@ function capLabel(name: string): string {
 export const CLAUDE_AGENT_ID = "claude_cli";
 export const OPENCODE_AGENT_ID = "opencode_engine";
 const CLAUDE_COLOR = "#F97316";
-const OPENCODE_COLOR = "#F5E6D3";
+const OPENCODE_COLOR = "#14B8A6";
 
 /** Extra per-agent info pushed with each state update. All optional; missing → "–". */
 export interface AgentMeta {
@@ -108,7 +110,7 @@ interface Agent3D {
   dimmed?: boolean;
   /** Claude Code CLI is a tool, not a person: rendered as a floating energy orb instead of a body. */
   orb?: Orb;
-  /** OpenCode is an engine, not a person: rendered as a small terminal/server appliance. */
+  /** OpenCode is an engine, not a person: rendered as a 3-unit server stack. */
   terminal?: Terminal;
 }
 /** One orbiting ember (units: orb radii, like the reference's R-relative maths). */
@@ -118,128 +120,31 @@ interface Tendril { a0: number; span: number; r0: number; shrink: number; speed:
 /** A particle layer: one buffer drawn twice (behind the orb, then in front of it). */
 interface OrbLayer { geo: THREE.BufferGeometry; pos: Float32Array; col: Float32Array; size: Float32Array; back: THREE.Points; front: THREE.Points }
 interface Orb {
-  state: ToolStatus; float: THREE.Group; plane: THREE.Mesh; mat: THREE.ShaderMaterial; fallback: THREE.MeshBasicMaterial | null;
-  /** Amber Claude mascot, replacing the former glass orb silhouette. */
+  state: ToolStatus; float: THREE.Group;
+  /** Orange (#F97316) flat-shaded Claude mascot. */
   mascot: THREE.Mesh<THREE.OctahedronGeometry, THREE.MeshStandardMaterial>;
   glow: THREE.Sprite; fx: THREE.Group; embers: Ember[]; tendrils: Tendril[]; emberLayer: OrbLayer; smokeLayer: OrbLayer;
   fxMats: THREE.ShaderMaterial[]; textures: THREE.Texture[]; light: THREE.PointLight;
   pulse: number; spin: number; time: number; tagClock: number;
 }
 interface Terminal {
-  screen: THREE.MeshLambertMaterial;
-  led: THREE.MeshBasicMaterial;
+  /** One teal screen plane + one LED per stacked server unit (shared materials). */
+  screen: THREE.MeshBasicMaterial;
+  led: THREE.MeshStandardMaterial;
+  state: OpenCodeState;
   time: number;
 }
 /** Claude CLI orb: floats in the empty south-west corner of the Lantai 2 "Area Kerja Agen" (floor-plan px 540, 950),
     clear of the agent pods (x 760-1200), the west wall (x 445) and the library wall (y 1070). */
 const ORB_POS = { x: wx(540), z: wz(950) };
-/** OpenCode terminal, placed immediately east of Claude's Lantai 2 appliance. */
-const OPENCODE_POS = { x: wx(650), z: wz(950) };
+/** OpenCode server stack: flush against the Lantai 2 west wall (x 445), ~2.3u north-west of Claude, clear of the plants. */
+const OPENCODE_POS = { x: wx(468), z: wz(860) };
+const OPC_TEAL = 0x14B8A6, OPC_CHASSIS = 0x14201F;
 const ORB_Y = 1.6;   // centre height above the floor (about a character's shoulder)
-const ORB_R = 0.5;   // glass sphere radius (1u across, roughly one character)
+const ORB_R = 0.5;   // mascot radius (1u across, roughly one character)
 const ORB_EMBERS = 80, ORB_TENDRILS = 16, ORB_SEG = 14;
 const TAU = Math.PI * 2;
 
-/* Clay/glass orb shaders, ported from the reference orb.html (WebGL1 full-screen quad -> Three.js billboard).
-   Changes vs. the reference FS: uv comes from vUv (-1..1 across the plane) instead of gl_FragCoord/uRes, uRes is
-   gone, and the 2-pixel edge AA uses fwidth(r) instead of 2.0/px. Everything else is verbatim. gl_FragColor /
-   texture2D keep working: ShaderMaterial (glslVersion unset) maps them onto GLSL ES 3.00 for WebGL2. */
-const ORB_VS = /* glsl */ `
-varying vec2 vUv;
-void main() {
-  vUv = uv;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-const ORB_FS = /* glsl */ `
-#ifdef GL_FRAGMENT_PRECISION_HIGH
-precision highp float;
-#else
-precision mediump float;
-#endif
-uniform float uTime;
-uniform float uPulse;
-varying vec2 vUv;
-
-float hash(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
-float noise(vec2 p){
-  vec2 i = floor(p), f = fract(p);
-  vec2 u = f*f*(3.0-2.0*f);
-  float a = hash(i), b = hash(i+vec2(1.0,0.0)), c = hash(i+vec2(0.0,1.0)), d = hash(i+vec2(1.0,1.0));
-  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
-}
-float fbm(vec2 p){
-  float v = 0.0, a = 0.5;
-  mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
-  for(int i=0;i<5;i++){ v += a*noise(p); p = m*p; a *= 0.5; }
-  return v;
-}
-mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
-
-void main(){
-  vec2 uv = vUv * 2.0 - 1.0;
-  float r = length(uv);
-  float aa = 2.0*fwidth(r); // derivative taken before the early return (needs uniform control flow)
-  if (r > 1.0) { gl_FragColor = vec4(0.0); return; }
-  float t = uTime;
-  float z = sqrt(max(0.0, 1.0 - r*r));
-  vec3 n = vec3(uv, z);
-
-  vec2 p = uv/(0.5 + z*0.5);
-  p = rot(t*0.07)*p*1.55;
-  float sw = 1.3/(1.0 + dot(p,p)*0.55);
-  p = rot(sw*(0.9*sin(t*0.27) + t*0.18))*p;
-
-  vec2 q  = vec2(fbm(p + vec2(0.0, t*0.12)), fbm(p + vec2(5.2,1.3) - t*0.10));
-  vec2 rr = vec2(fbm(p + 3.0*q + vec2(1.7,9.2) + t*0.15), fbm(p + 3.0*q + vec2(8.3,2.8) - t*0.13));
-  float f = fbm(p + 3.5*rr);
-
-  vec3 deep = vec3(0.10, 0.035, 0.02);
-  vec3 mid  = vec3(0.70, 0.31, 0.19);
-  vec3 hot  = vec3(1.0, 0.74, 0.56);
-  vec3 col = mix(deep, mid, smoothstep(0.22, 0.72, f));
-  col = mix(col, hot, smoothstep(0.62, 0.95, f)*0.65);
-
-  float veins = pow(1.0 - abs(sin(f*13.0 + rr.x*6.0)), 7.0);
-  col += veins*vec3(0.98, 0.58, 0.40)*0.38*smoothstep(0.3, 0.75, length(q));
-
-  float dark = smoothstep(0.46, 0.72, fbm(p*1.25 - rr*2.0 + t*0.05));
-  col *= mix(1.0, 0.32, dark);
-
-  float sr = length(uv);
-  float sa = atan(uv.y, uv.x);
-  float sn = fbm(vec2(sa*1.2, sr*6.0 - t*0.6));
-  float phase = 2.0*sa - 15.0*sr + t*1.1 + (sn - 0.5)*0.9;
-  float arm = smoothstep(0.72, 1.0, sin(phase));
-  float smask = smoothstep(0.44, 0.26, sr)*smoothstep(0.02, 0.07, sr);
-  float core = exp(-sr*sr*260.0);
-  float flick = 0.62 + 0.18*sin(t*2.1) + 0.1*sin(t*5.3 + 1.7) + uPulse*0.6;
-  float sigil = arm*smask*(1.0 - sr*1.4);
-  vec3 sigCol = mix(vec3(0.96, 0.52, 0.34), vec3(1.0, 0.9, 0.78), core + arm*0.25*smask);
-  col = mix(col, sigCol, clamp(sigil*1.3 + core, 0.0, 1.0)*clamp(flick, 0.0, 1.0));
-  float halo = exp(-sr*3.4);
-  col += vec3(0.85, 0.42, 0.26)*halo*0.32*flick;
-
-  vec3 L = normalize(vec3(0.45, 0.6, 0.7));
-  col *= 0.55 + 0.5*max(dot(n, L), 0.0);
-  float fres = pow(1.0 - z, 2.4);
-  col *= mix(1.0, 0.6, smoothstep(0.55, 1.0, r));
-  col += vec3(0.85, 0.42, 0.29)*fres*0.95;
-  col += vec3(0.60, 0.25, 0.15)*smoothstep(0.2, 1.0, -uv.y)*fres*0.7;
-
-  vec3 Hv = normalize(L + vec3(0.0, 0.0, 1.0));
-  float spec = pow(max(dot(n, Hv), 0.0), 70.0);
-  col += vec3(1.0, 0.94, 0.88)*spec*0.85;
-  float gloss = smoothstep(0.38, 0.0, length((uv - vec2(0.22, 0.58))*vec2(1.0, 2.1)));
-  col += vec3(1.0, 0.80, 0.68)*gloss*0.16;
-  float crescent = smoothstep(0.035, 0.0, abs(r - 0.93))*smoothstep(0.1, 0.7, uv.y + uv.x*0.3);
-  col += vec3(1.0, 0.75, 0.60)*crescent*0.22;
-
-  col *= 1.0 + uPulse*0.55;
-  col = col/(1.0 + col*0.3);
-
-  float alpha = smoothstep(1.0, 1.0 - aa, r);
-  gl_FragColor = vec4(col*alpha, alpha);
-}`;
 /** Embers/smoke points: world-sized sprites; uSide keeps only the points behind (-1) or in front (+1) of the orb centre. */
 const ORB_PTS_VS = /* glsl */ `
 attribute float aSize;
@@ -316,19 +221,19 @@ function readSidebarOpen() {
   try { return localStorage.getItem(SIDEBAR_KEY) !== "false"; } catch { return true; }
 }
 const hex6 = (n: number) => "#" + n.toString(16).padStart(6, "0");
-/** Roster icon for Claude CLI: an amber diamond/hexagon mascot. */
+/** Roster icon for Claude CLI: an orange (#F97316) diamond/hexagon mascot. */
 function drawClaudeMascotFace(state: ToolStatus): string {
   const c = document.createElement("canvas"); c.width = c.height = 64;
   const g = c.getContext("2d");
   if (!g) return "";
   g.fillStyle = "#1c1f26"; g.fillRect(0, 0, 64, 64);
-  const col = state === "working" ? "#F59E0B" : state === "idle" ? "#8B6914" : "#5A5A5A";
+  const col = state === "working" ? "#F97316" : state === "idle" ? "#9A4A12" : "#5A5A5A";
   g.globalAlpha = state === "working" ? 1 : 0.7;
-  g.shadowColor = state === "working" ? "#F59E0B" : "transparent"; g.shadowBlur = state === "working" ? 10 : 0;
+  g.shadowColor = state === "working" ? "#F97316" : "transparent"; g.shadowBlur = state === "working" ? 10 : 0;
   g.fillStyle = col; g.beginPath();
   g.moveTo(32, 5); g.lineTo(57, 20); g.lineTo(51, 48); g.lineTo(32, 59); g.lineTo(13, 48); g.lineTo(7, 20); g.closePath(); g.fill();
-  g.shadowBlur = 0; g.strokeStyle = "#FFE7A3"; g.lineWidth = 2; g.stroke();
-  g.fillStyle = state === "working" ? "#FFF7D6" : "#E8C46B"; g.beginPath(); g.moveTo(32, 14); g.lineTo(45, 23); g.lineTo(41, 41); g.lineTo(32, 47); g.lineTo(23, 41); g.lineTo(19, 23); g.closePath(); g.fill();
+  g.shadowBlur = 0; g.strokeStyle = "#FDBA74"; g.lineWidth = 2; g.stroke();
+  g.fillStyle = state === "working" ? "#FFEDD5" : "#E8A46B"; g.beginPath(); g.moveTo(32, 14); g.lineTo(45, 23); g.lineTo(41, 41); g.lineTo(32, 47); g.lineTo(23, 41); g.lineTo(19, 23); g.closePath(); g.fill();
   g.fillStyle = col; g.beginPath(); g.arc(26, 29, 2.5, 0, Math.PI * 2); g.arc(38, 29, 2.5, 0, Math.PI * 2); g.fill();
   return c.toDataURL();
 }
@@ -367,7 +272,6 @@ export class OfficeScene3D {
   private geos = new Map<string, THREE.BufferGeometry>();
   private dimMats = new Map<THREE.Material, THREE.Material>();
   private HIT = new THREE.MeshBasicMaterial({ visible: false });
-  private tmpQ = new THREE.Quaternion();
   private tmpV = new THREE.Vector3();
 
   private agents: Agent3D[] = [];
@@ -480,9 +384,9 @@ export class OfficeScene3D {
     this.setAgentState(CLAUDE_AGENT_ID, status, "Claude Code CLI", label, { role: "Coding tool", color: CLAUDE_COLOR, desk: 4 });
   }
 
-  /** OpenCode engine is always visible as a Lantai 2 terminal; telemetry is optional. */
-  setOpenCodeState(state: ToolStatus, label: string) {
-    const status: AgentStatus = state === "working" ? "working" : state === "idle" ? "idle" : "error";
+  /** OpenCode engine is always visible as a Lantai 2 server stack; state comes from GET /api/agents/tools. */
+  setOpenCodeState(state: OpenCodeState, label: string) {
+    const status: AgentStatus = state === "working" ? "working" : state === "standby" ? "idle" : state === "offline" ? "offline" : "error";
     this.setAgentState(OPENCODE_AGENT_ID, status, "OpenCode", label, { role: "Terminal engine", color: OPENCODE_COLOR, desk: 10 });
   }
 
@@ -757,66 +661,60 @@ export class OfficeScene3D {
   }
 
   private toolState(s: AgentStatus): ToolStatus { return s === "working" ? "working" : s === "idle" ? "idle" : "unknown"; }
-  /** Claude Code CLI as the clay/glass orb from the reference: a camera-facing shader billboard, back glow,
-      smoke tendrils + orbiting embers (drawn behind and in front of the glass), and a warm point light. */
-  /** OpenCode server/terminal appliance: a compact rack with a glowing terminal face. */
+  /** OpenCode engine: 3 stacked dark server units (#14201F) against the west wall, each with a teal (#14B8A6)
+      screen plane and LED on its east face. offline = LEDs off + dark screens, standby = dim teal, working = bright pulse. */
   private buildTerminal(d: AgentData, deskIdx: number): Agent3D {
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
-    const chassis = new THREE.MeshLambertMaterial({ color: "#29252a" });
-    const screen = new THREE.MeshLambertMaterial({ color: "#221d1d", emissive: "#d97757", emissiveIntensity: 0.45 });
-    const led = new THREE.MeshBasicMaterial({ color: "#f2a91e" });
-    this.box(body, 0.82, 0.92, 0.58, 0, 0.08, 0, chassis);
-    this.box(body, 0.62, 0.38, 0.02, 0, 0.42, -0.30, screen);
-    this.box(body, 0.46, 0.025, 0.018, 0, 0.56, -0.315, led);
-    this.box(body, 0.06, 0.06, 0.025, -0.28, 0.20, -0.315, led);
-    this.box(body, 0.06, 0.06, 0.025, -0.18, 0.20, -0.315, led);
-    this.box(body, 0.62, 0.04, 0.58, 0, 1.00, 0, "#40383c");
-    const hit = this.box(g, 1.05, 1.25, 0.9, 0, 0, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
+    const chassis = new THREE.MeshLambertMaterial({ color: OPC_CHASSIS });
+    const screen = new THREE.MeshBasicMaterial({ color: 0x050909 });
+    const led = new THREE.MeshStandardMaterial({ color: 0x0b1413, emissive: OPC_TEAL, emissiveIntensity: 0, roughness: 0.4, metalness: 0 });
+    const screenGeo = this.geo("opcScreen", () => new THREE.PlaneGeometry(1.0, 0.3));
+    // Long side (2.0u) runs along the wall (z), depth 0.9u into the room (x); front face = +x. Total height 1.54u.
+    for (let k = 0; k < 3; k++) {
+      const y = k * 0.52;
+      this.box(body, 0.9, 0.5, 2.0, 0, y, 0, chassis);
+      const sc = new THREE.Mesh(screenGeo, screen); sc.rotation.y = Math.PI / 2; sc.position.set(0.452, y + 0.25, -0.25); body.add(sc);
+      this.box(body, 0.02, 0.08, 0.08, 0.46, y + 0.21, 0.7, led);
+    }
+    const hit = this.box(g, 1.0, 1.6, 2.1, 0, 0, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
     const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
-    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; ring.renderOrder = 5; g.add(ring);
-    const tag = this.makeTag(g, 1.55), stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
+    ring.rotation.x = -Math.PI / 2; ring.position.set(0.9, 0.04, 0); ring.visible = false; ring.renderOrder = 5; g.add(ring);
+    const tag = this.makeTag(g, 1.95), stub = new THREE.Sprite(); stub.visible = false; g.add(stub);
     const a: Agent3D = {
-      data: d, group: g, body, lightMat: led, shirt: chassis,
+      // lightMat is a throwaway: setAgentState recolours it per status, the teal LEDs are driven by applyTerminal.
+      data: d, group: g, body, lightMat: new THREE.MeshBasicMaterial(), shirt: chassis,
       legL: new THREE.Group(), legR: new THREE.Group(), armL: new THREE.Group(), armR: new THREE.Group(),
       book: hit, hit, ring, tag, zzz: stub, dots: stub, excl: stub,
       spot: null, path: [], floor: 2, lastNode: "hubW", pose: "stand", atSpot: true, deskIdx, since: null, phase: 0,
-      terminal: { screen, led, time: 0 },
+      terminal: { screen, led, state: "unknown", time: 0 },
     };
     hit.userData.agent = a;
+    this.applyTerminal(a);
     this.drawTag(a);
     return a;
   }
 
+  /** Claude Code CLI: an orange (#F97316) flat-shaded octahedron mascot with a back glow, smoke tendrils +
+      orbiting embers (drawn behind and in front of it), and a warm point light. */
   private buildOrb(d: AgentData, deskIdx: number): Agent3D {
     this.hookShaderErrors();
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
     const float = new THREE.Group(); float.position.y = ORB_Y; g.add(float);
 
-    const mat = new THREE.ShaderMaterial({
-      vertexShader: ORB_VS, fragmentShader: ORB_FS, defines: { CLAUDE_ORB: 1 },
-      uniforms: { uTime: { value: 0 }, uPulse: { value: 0 } },
-      transparent: true, depthWrite: false, side: THREE.FrontSide, premultipliedAlpha: true,
-    });
-    const plane = new THREE.Mesh(this.geo("orbPlane", () => new THREE.PlaneGeometry(1, 1)), mat);
-    plane.scale.setScalar(ORB_R * 2); plane.renderOrder = 2; float.add(plane);
-    // The tool is represented by Claude's angular amber mascot, not a glass sphere.
-    // Keep the old shader as an invisible fallback path so existing WebGL error
-    // handling remains safe on devices that cannot compile the particle shaders.
-    plane.visible = false;
     const mascotMat = new THREE.MeshStandardMaterial({
-      color: 0xF59E0B, emissive: 0xB45309, emissiveIntensity: 0.45,
-      roughness: 0.28, metalness: 0.08,
+      color: 0xF97316, emissive: 0xB45309, emissiveIntensity: 0.45,
+      roughness: 0.28, metalness: 0.08, flatShading: true,
     });
     const mascot = new THREE.Mesh(this.geo("claudeMascot", () => new THREE.OctahedronGeometry(ORB_R * 1.05, 1)), mascotMat);
     mascot.rotation.z = Math.PI / 4; mascot.rotation.x = 0.12; mascot.renderOrder = 2; float.add(mascot);
 
     // Back glow ("pendaran"): reference gradient from 0.85 R to 2.1 R.
-    const glowTex = gradientTexture(128, [[0, "rgba(255,214,94,1)"], [0.45, "rgba(245,158,11,0.37)"], [1, "rgba(180,83,9,0)"]], 0.85 / 2.1);
+    const glowTex = gradientTexture(128, [[0, "rgba(253,186,116,1)"], [0.45, "rgba(249,115,22,0.37)"], [1, "rgba(180,83,9,0)"]], 0.85 / 2.1);
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, opacity: 0.3 }));
     glow.scale.setScalar(ORB_R * 2 * 2.1); glow.renderOrder = 1; float.add(glow);
 
     // Ember sprite = the reference's glow sprite; smoke = a soft round puff tinted per point.
-    const emberTex = gradientTexture(64, [[0, "rgba(255,236,218,1)"], [0.12, "rgba(240,152,108,0.95)"], [0.38, "rgba(217,119,87,0.35)"], [1, "rgba(140,60,30,0)"]]);
+    const emberTex = gradientTexture(64, [[0, "rgba(255,237,213,1)"], [0.12, "rgba(251,146,60,0.95)"], [0.38, "rgba(249,115,22,0.35)"], [1, "rgba(154,52,18,0)"]]);
     const smokeTex = gradientTexture(64, [[0, "rgba(255,255,255,0.9)"], [0.5, "rgba(255,255,255,0.35)"], [1, "rgba(255,255,255,0)"]]);
     const fx = new THREE.Group(); fx.rotation.set(0.22, 0, -0.32); float.add(fx); // tilted orbit plane (reference TILT)
     const fxMats: THREE.ShaderMaterial[] = [];
@@ -845,7 +743,7 @@ export class OfficeScene3D {
     }));
 
     // Never toggle light.visible: a changing light count recompiles every material. Intensity only.
-    const light = new THREE.PointLight(0xff8c00, 0, 4, 2); float.add(light);
+    const light = new THREE.PointLight(0xF97316, 0, 4, 2); float.add(light);
     const hit = this.box(g, 1.1, 1.3, 1.1, 0, ORB_Y - 0.65, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
     const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)),
       new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
@@ -859,7 +757,7 @@ export class OfficeScene3D {
       book: hit, hit, ring, tag, zzz: stub, dots: stub, excl: stub,
       spot: null, path: [], floor: 1, lastNode: "hubW", pose: "stand", atSpot: false, deskIdx, since: null, phase: 0,
       orb: {
-        state: "unknown", float, plane, mat, fallback: null, mascot, glow, fx, embers, tendrils, emberLayer, smokeLayer,
+        state: "unknown", float, mascot, glow, fx, embers, tendrils, emberLayer, smokeLayer,
         fxMats, textures: [emberTex, smokeTex], light, pulse: 0, spin: 0, time: 0, tagClock: 0,
       },
     };
@@ -869,21 +767,23 @@ export class OfficeScene3D {
     this.drawTag(a);
     return a;
   }
+  private opcState(s: AgentStatus): OpenCodeState { return s === "working" ? "working" : s === "idle" ? "standby" : s === "offline" ? "offline" : "unknown"; }
+  /** offline/unknown: LEDs off, screens dark. standby: dim teal (LED emissive 0.4). working: bright, pulsed in stepTerminal. */
   private applyTerminal(a: Agent3D) {
-    const t = a.terminal!;
-    t.screen.emissiveIntensity = a.data.status === "working" ? 1.1 : a.data.status === "error" ? 0.15 : 0.45;
-    t.led.color.set(a.data.status === "working" ? "#2fbf71" : a.data.status === "error" ? "#ef4b4b" : "#f2a91e");
+    const t = a.terminal!; t.state = this.opcState(a.data.status);
+    t.led.emissiveIntensity = t.state === "working" ? 1.2 : t.state === "standby" ? 0.4 : 0;
+    t.led.color.set(t.state === "offline" || t.state === "unknown" ? 0x0b1413 : 0x0f2a27);
+    t.screen.color.set(t.state === "working" ? OPC_TEAL : t.state === "standby" ? 0x0d5c54 : 0x050909);
     this.dirty = true;
   }
-  private stepTerminal(a: Agent3D, dt: number, time: number) {
+  private stepTerminal(a: Agent3D, dt: number, _time: number) {
     const t = a.terminal!; t.time += dt;
-    if (a.data.status === "working") {
-      t.screen.emissiveIntensity = 0.85 + Math.sin(t.time * 7) * 0.25;
-      t.led.color.set(Math.sin(t.time * 5) > 0 ? "#2fbf71" : "#8ee8ad");
-    }
-    a.body.rotation.y = Math.sin(time * 0.35) * 0.04;
+    if (t.state !== "working" || this.reduce) return;
+    const k = 0.5 + 0.5 * Math.sin(t.time * 4);
+    t.led.emissiveIntensity = 0.8 + 0.8 * k; // 0.8 .. 1.6
+    t.screen.color.setHex(OPC_TEAL).multiplyScalar(0.8 + 0.2 * k);
   }
-  /** Route GL compile/link errors: a failing orb shader swaps to a plain glowing disc instead of rendering nothing. */
+  /** Route GL compile/link errors: a failing Claude particle shader hides the particle layers (the mascot mesh stays). */
   private hookShaderErrors() {
     if (this.renderer.debug.onShaderError) return;
     this.renderer.debug.onShaderError = (gl, program, vs, fs) => {
@@ -892,13 +792,9 @@ export class OfficeScene3D {
     };
   }
   private orbFallback(a: Agent3D) {
-    const o = a.orb!; if (o.fallback) return;
-    // Same as the reference's 2D fallback: an offset radial gradient disc.
-    const tex = gradientTexture(128, [[0, "#ffd2b8"], [0.25, "#d97757"], [0.75, "#6b2d1a"], [0.97, "#c46a4c"], [1, "rgba(196,106,76,0)"]]);
-    o.textures.push(tex);
-    o.fallback = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
-    o.plane.material = o.fallback; o.fx.visible = false; o.fx.userData.off = true;
-    console.warn("[office3d] Claude CLI orb shader failed to compile; using the simple glowing disc");
+    const o = a.orb!; if (o.fx.userData.off) return;
+    o.fx.visible = false; o.fx.userData.off = true;
+    console.warn("[office3d] Claude CLI particle shader failed to compile; showing the mascot without particles");
   }
   /** State change: pulse kick on entering "working", particles/light per state. */
   private applyOrb(a: Agent3D) {
@@ -920,17 +816,12 @@ export class OfficeScene3D {
     if (working) o.pulse = Math.max(o.pulse, 0.3); else if (!idle) o.pulse = 0;
     o.spin += d * (1 + o.pulse * 3);
     const T = o.time, P = o.pulse;
-    o.mat.uniforms.uTime.value = T; o.mat.uniforms.uPulse.value = P;
 
     if (!this.reduce && o.state !== "unknown") o.float.position.y = ORB_Y + (working ? Math.sin(T * 2.4) * 0.14 : Math.sin(T * 1.25) * 0.05);
-    o.plane.scale.setScalar(ORB_R * 2 * (1 + 0.012 * Math.sin(T * 1.25) + P * 0.035));
     o.mascot.rotation.y += d * (working ? 1.15 : 0.35);
     o.mascot.rotation.z = Math.PI / 4 + Math.sin(T * 0.8) * 0.035;
     o.mascot.scale.setScalar(1 + P * 0.08);
     o.mascot.material.emissiveIntensity = (working ? 0.7 : 0.3) + P * 0.65;
-    // Billboard: cancel the parents' rotation, then take the camera's.
-    o.float.getWorldQuaternion(this.tmpQ).invert();
-    o.plane.quaternion.copy(this.tmpQ).multiply(this.camera.quaternion);
     (o.glow.material as THREE.SpriteMaterial).opacity = o.state === "unknown" ? 0.12 : Math.min(1, 0.3 + 0.07 * Math.sin(T * 1.3) + P * 0.35);
     if (working) o.light.intensity = (1 + Math.min(1, P * 0.65 + 0.35 * (0.5 + 0.5 * Math.sin(T * 2.6)))) * Math.PI;
 
@@ -1015,9 +906,10 @@ export class OfficeScene3D {
     a.shirt.dispose(); a.lightMat.dispose(); (a.ring.material as THREE.Material).dispose();
     if (a.orb) {
       const o = a.orb; // glow sprite material/map are disposed by the sprite traversal above
-      [o.mat, o.mascot.material, ...o.fxMats, ...(o.fallback ? [o.fallback] : [])].forEach((m) => m.dispose());
+      [o.mascot.material, ...o.fxMats].forEach((m) => m.dispose());
       o.textures.forEach((t) => t.dispose()); o.emberLayer.geo.dispose(); o.smokeLayer.geo.dispose(); o.light.dispose();
     }
+    if (a.terminal) { a.terminal.screen.dispose(); a.terminal.led.dispose(); }
     this.agents = this.agents.filter((x) => x !== a); this.byId.delete(a.data.id);
     if (this.selected === a) this.selected = null;
     this.dirty = true;
@@ -1227,7 +1119,7 @@ export class OfficeScene3D {
       const st = el("i"); st.style.background = STATUS[a.data.status].color; av.appendChild(st);
       const oc = a.data.id.startsWith("openclaw:");
       const engine = !!a.terminal;
-      const fw = el("span", "o3d-fw " + (engine ? "badge-opencode" : oc ? "badge-openclaw" : "badge-hermes"), engine ? "OC" : oc ? "OC" : "H");
+      const fw = el("span", "o3d-fw " + (engine ? "badge-opencode" : oc ? "badge-openclaw" : "badge-hermes"), engine ? "OPC" : oc ? "OC" : "H");
       fw.title = engine ? "OpenCode engine" : oc ? "OpenClaw agent" : "Hermes agent";
       const nm = el("span", "o3d-name"); nm.append(fw, el("span", "truncate", capLabel(a.data.name)));
       const who = el("span", "o3d-who"); who.appendChild(nm);

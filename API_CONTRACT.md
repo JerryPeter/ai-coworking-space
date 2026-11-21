@@ -26,6 +26,7 @@ trimmed from an actual response unless it says "illustrative".
   - office/agent state: `working | reviewing | idle | offline | unknown`
   - gateway: `running | stopped | unknown`
   - Claude tool: `working | idle | unknown`
+  - OpenCode tool: `working | standby | offline | unknown`
 - **Polling.** The office view can poll `/api/office/state` every 5 s (one request, about 20 ms).
   Other views: 15–30 s or on focus.
 
@@ -44,7 +45,7 @@ type Epoch = number;            // unix seconds, float
 type ProfileName = string;      // "kuririn_dev_lead" | "default" | "goku_cto" | "bulma_uiux" | ...
 type AgentState = "working" | "reviewing" | "idle" | "offline" | "unknown";
 type GatewayStatus = "running" | "stopped" | "unknown";
-type ToolState = "working" | "idle" | "unknown";
+type ToolState = "working" | "idle" | "standby" | "offline" | "unknown";
 ```
 
 ---
@@ -190,20 +191,25 @@ Note: all four profiles are currently served by one gateway process (same pid in
 
 ## 4. `GET /api/agents/tools`
 
-Auth: yes. Source: `/proc/*/cmdline`. argv match: program `claude` (or node/bun running `claude`)
-with its own `-p`/`--print` argument. Many processes collapse into one entity.
+Auth: yes. Source: read-only scan of `/proc/*/cmdline`. Claude Code CLI matches program `claude` (or node/bun running `claude`) with its own `-p`/`--print` argument. OpenCode matches program `opencode`, `opencode-pty`, or node/bun running either; `run`/`agent` is `working`, other OpenCode processes are `standby`, no matching process is `offline`, and an unreadable `/proc` root is `unknown`. Many processes collapse into one entity per tool.
 
 ```ts
 interface ToolsResponse {
-  tools: { name: "Claude Code CLI"; kind: "tool"; state: ToolState; process_count: number;
-           pids: number[]; detail: string }[];
+  tools: ({ name: "Claude Code CLI"; kind: "tool"; state: "working" | "idle" | "unknown" } |
+          { name: "OpenCode"; kind: "tool"; state: "working" | "standby" | "offline" | "unknown" })[];
+  // Both variants also include process_count: number, pids: number[], detail: string.
   source: string;
 }
 ```
+Illustrative response:
+
 ```json
-{"tools": [{"name": "Claude Code CLI", "kind": "tool", "state": "working", "process_count": 1,
-            "pids": [89323], "detail": "1 live `claude -p` process (pid 89323)"}],
- "source": "process scan of /proc/*/cmdline (argv match: claude ... -p|--print)"}
+{"tools": [
+  {"name": "Claude Code CLI", "kind": "tool", "state": "idle", "process_count": 0,
+   "pids": [], "detail": "no `claude -p` process found among 148 processes in /proc"},
+  {"name": "OpenCode", "kind": "tool", "state": "working", "process_count": 1,
+   "pids": [89324], "detail": "1 `opencode run|agent` process (pid 89324); 1 OpenCode process total"}
+], "source": "read-only process scan of /proc/*/cmdline (Claude Code CLI and OpenCode)"}
 ```
 
 ---
