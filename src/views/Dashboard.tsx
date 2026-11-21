@@ -17,6 +17,12 @@ import { clock, useNow } from "../lib/time";
 import { color, identity } from "../theme/agents";
 
 const ALERTS_KEY = "mc.alerts.collapsed";
+type TeamFilter = "all" | "hermes" | "openclaw";
+const TEAM_FILTERS: { key: TeamFilter; label: string }[] = [
+  { key: "all", label: "Semua" },
+  { key: "hermes", label: "Hermes" },
+  { key: "openclaw", label: "OpenClaw" },
+];
 const FEED_ITEMS = 5;
 
 export default function Dashboard() {
@@ -24,6 +30,9 @@ export default function Dashboard() {
   const summary = useApi(endpoints.summary, 30_000);
   const runs = useApi(endpoints.cronRuns, 30_000);
   const now = useNow(10_000);
+  const [filter, setFilter] = useState<TeamFilter>("all");
+  const showHermes = filter !== "openclaw";
+  const showOpenclaw = filter !== "hermes";
   const jobs = team.jobs.data?.jobs;
   const health = cronHealth(jobs);
 
@@ -42,19 +51,41 @@ export default function Dashboard() {
         {team.error && !team.members.length ? (
           <ErrorPanel what="team status" error={team.error} onRetry={() => { void refetch(endpoints.agents); void refetch(endpoints.office); }} />
         ) : (
-          <div className="team-strip">
-            {team.loading && !team.members.length
-              ? [0, 1, 2, 3].map((i) => <Skeleton key={i} h={64} r={12} style={{ flex: 1, minWidth: 200 }} />)
-              : team.members.map((m) => <MiniCard key={m.id} m={m} now={now} />)}
-            {team.openclawMembers.length > 0 && (
-              <>
-                <div className="team-divider"><span className="eyebrow">OpenClaw Team</span></div>
-                {team.openclawMembers.map((m) => <MiniCard key={m.id} m={m} now={now} />)}
-              </>
-            )}
-            <div className="team-divider"><span className="eyebrow">Tools</span></div>
-            <MiniToolCard tool={team.tool} />
-          </div>
+          <>
+            <div className="team-filter-bar" role="group" aria-label="Filter team">
+              {TEAM_FILTERS.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  className={`team-filter-btn${filter === f.key ? " active" : ""}`}
+                  aria-pressed={filter === f.key}
+                  onClick={() => setFilter(f.key)}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <div className="team-strip">
+              {showHermes && (team.loading && !team.members.length
+                ? [0, 1, 2, 3].map((i) => <Skeleton key={i} h={64} r={12} style={{ flex: "1 1 180px", minWidth: 160, maxWidth: 200 }} />)
+                : team.members.map((m) => <MiniCard key={m.id} m={m} now={now} />))}
+              {showOpenclaw && team.openclawMembers.length > 0 && (
+                <>
+                  {filter === "all" && <div className="team-divider"><span className="eyebrow">OpenClaw Team</span></div>}
+                  {team.openclawMembers.map((m) => <MiniCard key={m.id} m={m} now={now} />)}
+                </>
+              )}
+              {filter === "openclaw" && team.openclawMembers.length === 0 && (
+                <div className="team-strip-empty">Tidak ada agent OpenClaw.</div>
+              )}
+              {showHermes && (
+                <>
+                  <div className="team-divider"><span className="eyebrow">Tools</span></div>
+                  <MiniToolCard tool={team.tool} />
+                </>
+              )}
+            </div>
+          </>
         )}
       </section>
 

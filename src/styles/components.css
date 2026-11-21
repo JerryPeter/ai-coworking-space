@@ -197,11 +197,22 @@ a.tile:hover { border-color: var(--border-strong); text-decoration: none; color:
 .alert-summary { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
 
 /* ============ Team strip (6.1) ============ */
-.team-strip { display: flex; gap: var(--space-3); align-items: stretch; overflow-x: auto; padding-bottom: 2px; }
-.team-divider { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0 var(--space-1); }
-.team-divider::after { content: ""; flex: 1; width: 1px; background: var(--border-default); }
+/* Wrapping layout: every agent is visible, rows flow downward (no horizontal scroll). */
+.team-strip { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-start; padding-bottom: 2px; }
+/* Full-width divider forces a new row and draws a horizontal rule after its label. */
+.team-divider { flex: 0 0 100%; width: 100%; display: flex; flex-direction: row; align-items: center; gap: var(--space-2); padding: var(--space-1) 0 0; }
+.team-divider::after { content: ""; flex: 1; height: 1px; background: var(--border-default); }
+.team-filter-bar { display: flex; gap: 8px; margin-bottom: var(--space-3); flex-wrap: wrap; }
+.team-filter-btn {
+  height: 32px; padding: 0 12px; border-radius: var(--radius-md); font-size: var(--text-sm); font-weight: 500;
+  color: var(--text-secondary); background: var(--bg-surface); border: 1px solid var(--border-default);
+  transition: background-color var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+}
+.team-filter-btn:hover { color: var(--text-primary); border-color: var(--border-strong); }
+.team-filter-btn.active, .team-filter-btn[aria-pressed="true"] { background: var(--bg-surface-hover); color: var(--text-primary); border-color: var(--border-strong); }
+.team-strip-empty { font-size: var(--text-sm); color: var(--text-muted); padding: var(--space-2) 0; }
 .mini-card {
-  flex: 1; min-width: 200px; height: 64px; padding: 12px; display: flex; align-items: center; gap: 10px; text-align: left;
+  flex: 1 1 180px; min-width: 160px; max-width: 200px; height: 64px; padding: 12px; display: flex; align-items: center; gap: 10px; text-align: left;
   background: var(--bg-surface); border: 1px solid var(--border-subtle); border-left: 3px solid var(--agent-c);
   border-radius: var(--radius-lg); box-shadow: var(--card-rest-shadow);
   transition: border-color var(--dur-fast), background-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast);
@@ -211,7 +222,7 @@ a.tile:hover { border-color: var(--border-strong); text-decoration: none; color:
 .mini-card .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .mini-card .name { font-size: var(--text-sm); font-weight: 600; line-height: 18px; }
 .mini-card { position: relative; }
-/* OpenClaw marker: sits inside the card (the strip scrolls, so an outside pill would be clipped). */
+/* OpenClaw marker: sits inside the card so it never overlaps neighbouring cards in the wrapped grid. */
 .mini-oc-badge {
   position: absolute; top: 4px; right: 6px; pointer-events: none;
   font-size: 9px; font-weight: 700; line-height: 12px; letter-spacing: 0.02em; padding: 0 4px; border-radius: 3px;
