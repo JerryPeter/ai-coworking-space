@@ -1,8 +1,20 @@
 // Joins the per-agent API feeds into one roster model used by Dashboard, Agents, Office and drawers.
 import { endpoints, useApi } from "../api/client";
-import type { Agent, CronJob, OfficeAgent, Session, Tool } from "../api/types";
+import type { Agent, CronJob, OfficeAgent, OpenClawAgent, Session, Tool } from "../api/types";
 import { identity, rosterIndex, type AgentIdentity } from "../theme/agents";
 import { jobFailing, sessionsByProfile, sessionsToday } from "./derive";
+
+// Same order/id scheme as src/views/Office.tsx.
+const OPENCLAW_ORDER = ["chief", "researcher", "writer", "reviewer"];
+const ocRank = (n: string) => { const i = OPENCLAW_ORDER.indexOf(n); return i < 0 ? 99 : i; };
+
+function openclawIdentity(a: OpenClawAgent): AgentIdentity {
+  const name = a.display_name || a.name;
+  return {
+    id: `openclaw:${a.name}`, displayName: name, shortName: name, role: "OpenClaw",
+    cssVar: "--agent-openclaw", hex: "#F59E0B", hexLight: "#D97706", kind: "agent",
+  };
+}
 
 export interface TeamMember {
   id: string;
@@ -16,6 +28,8 @@ export interface TeamMember {
   jobs: CronJob[];
   failingJobs: number;
   lastActive: string | number | null;
+  framework?: "hermes" | "openclaw";
+  openclaw?: OpenClawAgent;   // raw /api/openclaw/agents row (OpenClaw members only)
 }
 
 export function useTeam(officeInterval = 30_000) {
@@ -24,6 +38,7 @@ export function useTeam(officeInterval = 30_000) {
   const tools = useApi(endpoints.tools, 30_000);
   const sessions = useApi(endpoints.sessions, 30_000);
   const jobs = useApi(endpoints.cronJobs, 30_000);
+  const openclaw = useApi(endpoints.openclaw, 30_000);
 
   // Profile list = what the API reports (never a hard-coded list); spec roster order.
   const ids = new Set<string>();
@@ -48,13 +63,33 @@ export function useTeam(officeInterval = 30_000) {
       jobs: own,
       failingJobs: own.filter(jobFailing).length,
       lastActive: off?.last_activity_at ?? latest?.last_activity_at_iso ?? latest?.started_at_iso ?? null,
+      framework: "hermes" as const,
     };
   });
 
+  // OpenClaw agents are kept OUT of `members` (Memory/Agents/AgentDrawer/tiles assume Hermes profiles).
+  const openclawMembers: TeamMember[] = [...(openclaw.data?.agents ?? [])]
+    .sort((a, b) => ocRank(a.name) - ocRank(b.name))
+    .map((a) => ({
+      id: `openclaw:${a.name}`,
+      ident: openclawIdentity(a),
+      agent: undefined,
+      office: undefined,
+      sessions: [],
+      sessionTotal: null,
+      today: null,
+      model: a.model,
+      jobs: [],
+      failingJobs: 0,
+      lastActive: a.last_run_at ?? null,
+      framework: "openclaw" as const,
+      openclaw: a,
+    }));
+
   const tool: Tool | undefined = tools.data?.tools[0];
   const loading = agents.loading && office.loading;
-  const error = agents.error ?? office.error ?? null;
-  return { members, tool, office, agents, tools, sessions, jobs, loading, error };
+  const error = agents.error ?? office.error ?? null; // openclaw errors deliberately excluded
+  return { members, openclawMembers, tool, office, agents, tools, sessions, jobs, openclaw, loading, error };
 }
 
 export type Team = ReturnType<typeof useTeam>;

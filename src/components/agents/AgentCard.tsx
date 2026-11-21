@@ -3,12 +3,12 @@ import { ChevronRight, Clock, Moon } from "lucide-react";
 import { endpoints, useApi } from "../../api/client";
 import type { OpenClawAgent, Tool } from "../../api/types";
 import { officeBadge, toolBadge } from "../../lib/derive";
-import { setParams, useRoute } from "../../lib/router";
+import { navigate, setParams, useRoute } from "../../lib/router";
 import type { TeamMember } from "../../lib/team";
 import { CLAUDE, CLAUDE_ID } from "../../theme/agents";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { RelTime } from "../ui/States";
-import { StatusBadge, StatusText } from "../ui/StatusBadge";
+import { StatusBadge, StatusText, type BadgeStatus } from "../ui/StatusBadge";
 
 const openAgent = (id: string) => setParams({ agent: id, tab: null });
 
@@ -145,7 +145,37 @@ export function OpenClawCard({ a, now }: { a: OpenClawAgent; now: number }) {
   );
 }
 
+// OpenClaw has no office state: derive only from real fields (error, shared gateway status).
+function openclawMiniStatus(a: OpenClawAgent | undefined): { status: BadgeStatus; label: string; title?: string } {
+  if (!a) return { status: "unknown", label: "Unknown" };
+  if (a.error) return { status: "failed", label: "Error", title: a.error };
+  if (a.gateway_status === "running") return { status: "online", label: "Online", title: "OpenClaw gateway running" };
+  return { status: "offline", label: "Offline", title: `OpenClaw gateway ${a.gateway_status}` };
+}
+
+function OpenClawMiniCard({ m, now }: { m: TeamMember; now: number }) {
+  const a = m.openclaw;
+  const st = openclawMiniStatus(a);
+  const glyph = a?.emoji || m.ident.displayName.charAt(0).toUpperCase() || "?";
+  return (
+    // No AgentDrawer for OpenClaw: clicking goes to the Agents view, which has the OpenClaw section.
+    <button type="button" className="mini-card oc" style={{ ["--agent-c" as string]: `var(${m.ident.cssVar})` }}
+      onClick={() => navigate("agents")} aria-label={`${m.ident.displayName} (OpenClaw), ${st.label}. Open Agents`}>
+      <span className="mini-oc-badge badge-openclaw" title="OpenClaw agent">OC</span>
+      <span className="mini-oc-avatar" aria-hidden="true">{glyph}</span>
+      <div className="who">
+        <span className="name truncate">{m.ident.displayName}</span>
+        <StatusText status={st.status} label={st.label} title={st.title} />
+      </div>
+      <span className="xs muted" style={{ alignSelf: "flex-end", whiteSpace: "nowrap" }}>
+        {m.lastActive ? <RelTime t={m.lastActive} now={now} /> : "Never run"}
+      </span>
+    </button>
+  );
+}
+
 export function MiniCard({ m, now }: { m: TeamMember; now: number }) {
+  if (m.framework === "openclaw" || m.id.startsWith("openclaw:")) return <OpenClawMiniCard m={m} now={now} />;
   const state = m.office?.state;
   return (
     <button type="button" className="mini-card" style={{ ["--agent-c" as string]: `var(${m.ident.cssVar})` }} onClick={() => openAgent(m.id)}>

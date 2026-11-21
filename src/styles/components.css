@@ -210,6 +210,17 @@ a.tile:hover { border-color: var(--border-strong); text-decoration: none; color:
 .mini-card:active { transform: none; box-shadow: none; }
 .mini-card .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .mini-card .name { font-size: var(--text-sm); font-weight: 600; line-height: 18px; }
+.mini-card { position: relative; }
+/* OpenClaw marker: sits inside the card (the strip scrolls, so an outside pill would be clipped). */
+.mini-oc-badge {
+  position: absolute; top: 4px; right: 6px; pointer-events: none;
+  font-size: 9px; font-weight: 700; line-height: 12px; letter-spacing: 0.02em; padding: 0 4px; border-radius: 3px;
+}
+.mini-oc-avatar {
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 6px;
+  font-size: 18px; line-height: 1; background: var(--agent-openclaw-subtle); color: var(--agent-openclaw); font-weight: 700;
+}
+.mini-card.oc { cursor: default; }
 
 /* ============ Two-column dashboard ============ */
 .dash-cols { display: grid; grid-template-columns: 7fr 5fr; gap: var(--space-6); }

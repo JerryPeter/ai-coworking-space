@@ -46,6 +46,12 @@ export default function Dashboard() {
             {team.loading && !team.members.length
               ? [0, 1, 2, 3].map((i) => <Skeleton key={i} h={64} r={12} style={{ flex: 1, minWidth: 200 }} />)
               : team.members.map((m) => <MiniCard key={m.id} m={m} now={now} />)}
+            {team.openclawMembers.length > 0 && (
+              <>
+                <div className="team-divider"><span className="eyebrow">OpenClaw Team</span></div>
+                {team.openclawMembers.map((m) => <MiniCard key={m.id} m={m} now={now} />)}
+              </>
+            )}
             <div className="team-divider"><span className="eyebrow">Tools</span></div>
             <MiniToolCard tool={team.tool} />
           </div>
