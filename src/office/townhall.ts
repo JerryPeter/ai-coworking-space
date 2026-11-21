@@ -26,6 +26,21 @@ const WH = LH - FT, WT = 0.16;
 export const wx = (p: number) => (p - OX) * S;
 export const wz = (p: number) => (p - OY) * S;
 
+/** Single-line text on a 1024x96 canvas (aspect ~10.7:1), e.g. the TransJakarta side lettering.
+ *  bg = null leaves the canvas transparent (use with a transparent material). The text is scaled down to fit the width.
+ *  No colorSpace is set: colour management is off in this scene and the other CanvasTextures leave it at default. */
+function makeTextTex(text: string, bg: string | null, fg: string): THREE.CanvasTexture {
+  const cw = 1024, ch = 96;
+  const c = document.createElement("canvas"); c.width = cw; c.height = ch;
+  const x = c.getContext("2d")!;
+  if (bg) { x.fillStyle = bg; x.fillRect(0, 0, cw, ch); }
+  x.fillStyle = fg; x.textAlign = "center"; x.textBaseline = "middle";
+  let px = 80; x.font = `800 ${px}px "Plus Jakarta Sans", Arial, sans-serif`;
+  const w = x.measureText(text).width; if (w > cw * 0.94) { px = Math.floor(px * (cw * 0.94) / w); x.font = `800 ${px}px "Plus Jakarta Sans", Arial, sans-serif`; }
+  x.fillText(text, cw / 2, ch / 2 + 3);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+}
+
 /** Corner floor lamps: off-ish by day, warm glow at night (setNight). */
 export const LAMP = { light: 0xffd580, dayI: 0.0, nightI: 0.9, dist: 6, decay: 1.5 };
 
@@ -1343,6 +1358,15 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       for (const sx of [-1, 1]) { for (const sz of [-1, 1]) tire(o, wl, 0.34, 0.24, sx * 0.86, sz * 1.35); bx(o, 0.32, 0.12, 0.02, "#fff6c8", sx * 0.6, 0.66, -2.11, false); bx(o, 0.32, 0.12, 0.02, "#d33", sx * 0.6, 0.66, 2.11, false); }
       return o;
     };
+    // TransJakarta side-label material, one per variant (shared by every bus of that variant; disposed with the scene)
+    const tjMats = new Map<"blue" | "orange", THREE.MeshLambertMaterial>();
+    const tjLabelMat = (variant: "blue" | "orange") => {
+      let m = tjMats.get(variant);
+      // accent-coloured text on the white body, lit like the body (Lambert) so it doesn't glow at night;
+      // orange is darkened (#c8570a) for contrast on white
+      if (!m) { m = new THREE.MeshLambertMaterial({ map: makeTextTex("TransJakarta", null, variant === "blue" ? "#1f4e9c" : "#c8570a"), transparent: true, alphaTest: 0.05, depthWrite: false }); tjMats.set(variant, m); }
+      return m;
+    };
     const BusTJ = (variant: "blue" | "orange", wl: THREE.Mesh[]) => {
       // TransJakarta livery (t_1fd4427f): both variants have a WHITE body; accent (blue / orange) on the
       // lower skirt, a belt stripe under the windows, roof and front face.
@@ -1357,6 +1381,15 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       bx(o, W, 0.35, L, roofColor, 0, 2.95, 0);                                  // roof (2.95..3.3)
       bx(o, W + 0.02, 0.6, L + 0.02, accentColor, 0, 0.4, 0, false);             // lower skirt (0.4..1.0)
       bx(o, W + 0.02, 0.14, L + 0.02, accentColor, 0, 1.3, 0, false);            // belt stripe under the windows
+      // "TransJakarta" lettering on both flanks (t_2e577fdc): on the white band between the skirt top (y 1.0) and
+      // the belt stripe (y 1.3), centred at y 1.15, z -2.2..1.0 (clear of the door at z -3.95..-3.05).
+      // PlaneGeometry faces +Z: rotate -PI/2 on the left (-X) and +PI/2 on the right (+X) so each faces outward
+      // and reads left-to-right (not mirrored). Offset 0.03 sits just outside the body/skirt (W/2 + 0.01) -> no z-fighting.
+      const tjMat = tjLabelMat(variant);
+      const tlL = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.3), tjMat);
+      tlL.rotation.y = -Math.PI / 2; tlL.position.set(-W / 2 - 0.03, 1.15, -0.6); o.add(tlL);
+      const tlR = new THREE.Mesh(tlL.geometry, tjMat);
+      tlR.rotation.y = Math.PI / 2; tlR.position.set(W / 2 + 0.03, 1.15, -0.6); o.add(tlR);
       for (const sx of [-1, 1]) bx(o, 0.04, 0.9, L - 0.5, darkColor, sx * (W / 2 + 0.01), 1.6, 0.1, false); // window strip
       bx(o, W + 0.02, 2.9, 0.04, frontColor, 0, 0.4, -L / 2 - 0.01, false);      // front face (0.4..3.3)
       bx(o, W - 0.4, 1.0, 0.04, darkColor, 0, 1.8, -L / 2 - 0.03, false);        // windshield
