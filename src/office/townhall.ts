@@ -1151,6 +1151,9 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
   /* ---------- SITE ---------- */
   let vendGroup: THREE.Group | null = null;
   const walkers: { p: THREE.Group; dir: number; speed: number; ph: number }[] = [];
+  // Road traffic: moves along X and wraps at the road ends (wx(-1500)..wx(3500)); wheels spin with speed.
+  const vehicles: { p: THREE.Group; dir: number; speed: number; wheels: THREE.Mesh[]; r: number }[] = [];
+  const ROAD_X0 = wx(-1500), ROAD_X1 = wx(3500);
   const clouds: THREE.Group[] = []; const streetLights: THREE.PointLight[] = [];
   function buildSite(g: THREE.Group) {
     CUR = 0;
@@ -1328,6 +1331,31 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       const p = Folk({ shirt: shirts[i], pants: i % 2 ? "#3b4f6e" : "#2f3540", hair: i % 2 ? "#5a3a24" : "#1b1b1b" });
       const z = wz(i % 2 ? 2060 : 2085); const dir = i % 2 ? 1 : -1; add(g, p, -20 + i * 12, z, dir > 0 ? -90 : 90, 0.12); walkers.push({ p, dir, speed: 1.05 + rnd() * 0.35, ph: rnd() * 6 });
     }
+    // traffic: two opposing lanes, built along local Z with the front at -Z (like the parked Car reference)
+    const tire = (o: THREE.Group, wl: THREE.Mesh[], r: number, w: number, x: number, z: number) => {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 14), mat("#1e2126")); m.rotation.z = Math.PI / 2; m.position.set(x, r, z); m.castShadow = true; o.add(m); wl.push(m);
+    };
+    const Car = (c: string, wl: THREE.Mesh[]) => {
+      const o = G(); bx(o, 1.8, 0.62, 4.2, c, 0, 0.3, 0); bx(o, 1.6, 0.6, 2.2, c, 0, 0.92, 0.2); bx(o, 1.64, 0.4, 2.0, "#2a3a4c", 0, 1.0, 0.2, false);
+      for (const sx of [-1, 1]) { for (const sz of [-1, 1]) tire(o, wl, 0.34, 0.24, sx * 0.86, sz * 1.35); bx(o, 0.32, 0.12, 0.02, "#fff6c8", sx * 0.6, 0.66, -2.11, false); bx(o, 0.32, 0.12, 0.02, "#d33", sx * 0.6, 0.66, 2.11, false); }
+      return o;
+    };
+    const Bus = (c: string, wl: THREE.Mesh[]) => {
+      const o = G(); const L = 9.2, W = 2.4;
+      bx(o, W, 2.55, L, c, 0, 0.4, 0); bx(o, W + 0.02, 0.14, L + 0.02, "#f4f4f4", 0, 1.35, 0, false); bx(o, W - 0.1, 0.12, L - 0.2, "#d9dcdf", 0, 2.95, 0, false);
+      for (const sx of [-1, 1]) for (let i = 0; i < 6; i++) bx(o, 0.04, 0.85, 1.15, "#2a3a4c", sx * (W / 2 + 0.01), 1.6, -2.9 + i * 1.35, false);
+      bx(o, W - 0.3, 1.0, 0.04, "#2a3a4c", 0, 1.55, -L / 2 - 0.01, false); bx(o, W - 0.5, 0.6, 0.04, "#2a3a4c", 0, 1.8, L / 2 + 0.01, false);
+      bx(o, 0.04, 1.9, 0.9, "#2a3a4c", W / 2 + 0.02, 0.75, -3.7, false);
+      for (const sx of [-1, 1]) { for (const sz of [-3.0, 3.0]) tire(o, wl, 0.5, 0.3, sx * 1.08, sz); bx(o, 0.36, 0.16, 0.02, "#fff6c8", sx * 0.85, 0.75, -L / 2 - 0.02, false); bx(o, 0.36, 0.16, 0.02, "#d33", sx * 0.85, 0.75, L / 2 + 0.02, false); }
+      return o;
+    };
+    // [kind, colour, lane y (floor-plan px), start x (px)]; one speed per lane so nothing overtakes or overlaps.
+    const LANE_SPEED: Record<number, number> = { 2385: 5.2, 2555: 4.4 };
+    ([["car", "#d0302a", 2385, -1200], ["bus", "#f2b705", 2385, 300], ["car", "#2f6fd0", 2385, 1900],
+      ["car", "#f2f2ef", 2555, 3200], ["bus", "#2e9e5b", 2555, 1700], ["car", "#9aa3ad", 2555, 100]] as const).forEach(([kind, col, ly, sx]) => {
+      const wl: THREE.Mesh[] = []; const v = kind === "bus" ? Bus(col, wl) : Car(col, wl); const dir = ly === 2385 ? 1 : -1;
+      add(g, v, wx(sx), wz(ly), dir > 0 ? -90 : 90, 0.03); vehicles.push({ p: v, dir, speed: LANE_SPEED[ly], wheels: wl, r: kind === "bus" ? 0.5 : 0.34 });
+    });
     // guard & clouds
     const c = Folk({ shirt: "#2a3b55", pants: "#222" }); put(g, c, 1150, 1880, 180, 0);
     for (let i = 0; i < 26; i++) { const cl = Cloud(); cl.position.set(-110 + rnd() * 220, 22 + rnd() * 26, -120 + rnd() * 190); cl.scale.setScalar(0.7 + rnd() * 1.1); cl.rotation.y = rnd() * 6; scene.add(cl); clouds.push(cl); }
@@ -1489,6 +1517,11 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
           u.legs[0].rotation.x = swg * 0.5; u.legs[1].rotation.x = -swg * 0.5; u.arms[0].rotation.x = -swg * 0.4; u.arms[1].rotation.x = swg * 0.4;
         }
         w.p.position.y = 0.12 + (1 - Math.cos(2 * w.ph)) * 0.012;
+      }
+      for (const v of vehicles) {
+        v.p.position.x += v.dir * v.speed * dt;
+        if (v.p.position.x > ROAD_X1) v.p.position.x = ROAD_X0; if (v.p.position.x < ROAD_X0) v.p.position.x = ROAD_X1;
+        for (const w of v.wheels) w.rotation.x -= (v.speed * dt) / v.r;
       }
       for (const c of clouds) { c.position.x += dt * 0.6; if (c.position.x > 115) c.position.x = -115; }
     },

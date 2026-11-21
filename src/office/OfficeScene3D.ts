@@ -137,11 +137,14 @@ interface Terminal {
   time: number;
 }
 
-/** Claude CLI orb: floats in the empty south-west corner of the Lantai 2 "Area Kerja Agen" (floor-plan px 540, 950),
-    clear of the agent pods (x 760-1200), the west wall (x 445) and the library wall (y 1070). */
-const ORB_POS = { x: wx(540), z: wz(950) };
-/** OpenCode orb: occupies its former Lantai 2 west-wall spot, beside Claude Code. */
-const OPENCODE_POS = { x: wx(468), z: wz(860) };
+/** Engine orbs (radius 25 px) as a symmetric pair on Lantai 2 "Area Kerja Agen" (x 445-1379, centre x=912), both at y=800
+    (the aisle between the pod rows). 539 + 1285 = 2 × 912. The requested 475/1340 collided: 475 leaves 1 px to the west wall,
+    and 1340 sits on the cooA→cooB walk path (x=1350, y 500-1000) next to the x=1379 wall corner.
+    Claude CLI orb (west): 65 px clear of the west wall (inner face x≈449), >140 px from the west pods, 107 px from the sconce (453, 700). */
+const ORB_POS = { x: wx(539), z: wz(800) };
+/** OpenCode orb (east, mirror of ORB_POS around x=912): 40 px clear of the walk path (x=1350), 69 px from the wall corner (1379, 803),
+    ~30-37 px in plan from the east pod chairs (whose 1.0 m tops sit below the orb's 1.1 m underside), 64 px from the floor lamp (1325, 880). */
+const OPENCODE_POS = { x: wx(1285), z: wz(800) };
 const OPC_TEAL = 0x14B8A6;
 const ORB_Y = 1.6;   // centre height above the floor (about a character's shoulder)
 const ORB_R = 0.5;   // mascot radius (1u across, roughly one character)

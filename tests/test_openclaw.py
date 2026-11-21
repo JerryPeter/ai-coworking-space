@@ -32,9 +32,14 @@ with tempfile.TemporaryDirectory() as d:
     (Path(d) / "openclaw.json").write_text(json.dumps({
         "gateway": {"auth": {"token": "SECRET-SHOULD-NOT-APPEAR"}},
         "agents": {"defaults": {"model": "anthropic/claude-opus-5-5"},
-                   "entries": {"chief": {"identity": {"name": "Chief", "emoji": "C"}}, "openclaw": {}}}}))
+                   "entries": {"chief": {"identity": {"name": "Chief", "emoji": "C"}}, "openclaw": {},
+                               "greg": {"identity": {"name": "  Greg Graffin "}},
+                               "blank": {"identity": {"name": "   "}}}}}))
     config.OPENCLAW_HOME = Path(d)
-    check("system agent filtered", oc.list_openclaw_agents(), ["chief"])
+    check("system agent filtered", sorted(oc.list_openclaw_agents()), ["blank", "chief", "greg"])
+    check("display_name: first word", oc.openclaw_agent_info("greg")["display_name"], "Greg")
+    check("display_name: single word", oc.openclaw_agent_info("chief")["display_name"], "Chief")
+    check("display_name: blank -> id", oc.openclaw_agent_info("blank")["display_name"], "blank")
     check("system agent -> None", oc.openclaw_agent_info("openclaw"), None)
     r = oc.openclaw_agents()
     check("no db -> gateway unknown", r["gateway"], "unknown")

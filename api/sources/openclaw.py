@@ -157,9 +157,12 @@ def openclaw_agent_info(name: str, gateway: str | None = None, cfg: dict | None 
     model, inherited = _model_label(entry, cfg["default_model"])
     last_run, err = _last_run_at(name)
     allow = (entry.get("subagents") or {}).get("allowAgents") if isinstance(entry.get("subagents"), dict) else None
+    ident_name = ident.get("name")
+    # Short label: first word of the identity name ("Greg Graffin" -> "Greg"); blank -> agent id.
+    first_word = ident_name.split()[0] if isinstance(ident_name, str) and ident_name.split() else None
     return {
         "name": name,
-        "display_name": ident.get("name") if isinstance(ident.get("name"), str) else name,
+        "display_name": first_word or name,
         "emoji": ident.get("emoji") if isinstance(ident.get("emoji"), str) else None,
         "theme": ident.get("theme") if isinstance(ident.get("theme"), str) else None,
         "model": model,
