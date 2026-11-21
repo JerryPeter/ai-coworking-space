@@ -16,6 +16,11 @@ kuririn_dev_lead, bulma_uiux) with a Three.js "office" view. Successor to ~/miss
 
 API reference for frontend work: [API_CONTRACT.md](API_CONTRACT.md).
 
+Team operating workflow: [docs/DELEGATION_WORKFLOW.md](docs/DELEGATION_WORKFLOW.md).
+App/code follows Hawa → Goku → Kuririn + Bulma → Claude Code CLI; video follows
+Hawa → Bejita → Claude Code CLI. Hawa coordinates and verifies rather than
+implementing directly.
+
 ## Setup
 
     python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
