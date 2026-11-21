@@ -17,6 +17,20 @@ for module in (dashboard, agents, kanban, cron, activity, memory, skills, office
 app.include_router(api)
 
 
+@app.middleware("http")
+async def frontend_cache_headers(request, call_next):
+    """index.html (and SPA routes) must always be revalidated, otherwise a browser keeps an
+    old bundle after a rebuild (e.g. a profile rename leaves avatars blank). Hashed files
+    under /assets/ never change content, so they can be cached forever."""
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif not path.startswith("/api/") and path != "/health":
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}

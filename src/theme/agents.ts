@@ -4,7 +4,7 @@
 export type AgentKind = "agent" | "tool";
 
 export interface AgentIdentity {
-  id: string;            // profile id ("default", "pratama_cto", ...) or "claude_cli"
+  id: string;            // profile id ("default", "goku_cto", ...) or "claude_cli"
   displayName: string;
   shortName: string;
   role: string;
@@ -12,19 +12,23 @@ export interface AgentIdentity {
   hex: string;           // dark hex (also used by the 3D scene)
   hexLight: string;
   kind: AgentKind;
+  /** Fixed 3D-office desk (0..9). Claude CLI = 4, OpenClaw = 5..8, so new agents need an explicit free desk. */
+  desk?: number;
 }
 
 export const CLAUDE_ID = "claude_cli";
 
 export const AGENTS: AgentIdentity[] = [
   { id: "default", displayName: "Hawa The Second", shortName: "Hawa", role: "Lead Agent / Coordinator",
-    cssVar: "--agent-hawa", hex: "#A78BFA", hexLight: "#7C5CE0", kind: "agent" },
-  { id: "pratama_cto", displayName: "Pratama The CTO", shortName: "Pratama", role: "Lead Engineer",
-    cssVar: "--agent-pratama", hex: "#38BDF8", hexLight: "#0284C7", kind: "agent" },
-  { id: "bagas_dev_lead", displayName: "Bagas The Dev", shortName: "Bagas", role: "Lead Developer",
-    cssVar: "--agent-bagas", hex: "#84CC16", hexLight: "#4D7C0F", kind: "agent" },
-  { id: "susi_uiux", displayName: "Susi The UIUX", shortName: "Susi", role: "UI/UX Designer",
-    cssVar: "--agent-susi", hex: "#F472B6", hexLight: "#DB2777", kind: "agent" },
+    cssVar: "--agent-hawa", hex: "#A78BFA", hexLight: "#7C5CE0", kind: "agent", desk: 0 },
+  { id: "goku_cto", displayName: "Goku The CTO", shortName: "Goku", role: "Lead Engineer",
+    cssVar: "--agent-goku", hex: "#38BDF8", hexLight: "#0284C7", kind: "agent", desk: 1 },
+  { id: "kuririn_dev_lead", displayName: "Kuririn The Dev", shortName: "Kuririn", role: "Lead Developer",
+    cssVar: "--agent-kuririn", hex: "#84CC16", hexLight: "#4D7C0F", kind: "agent", desk: 2 },
+  { id: "bulma_uiux", displayName: "Bulma The UIUX", shortName: "Bulma", role: "UI/UX Designer",
+    cssVar: "--agent-bulma", hex: "#F472B6", hexLight: "#DB2777", kind: "agent", desk: 3 },
+  { id: "bejita_video_editor", displayName: "Bejita The Video Editor", shortName: "Bejita", role: "Video Editor",
+    cssVar: "--agent-bejita", hex: "#3B82F6", hexLight: "#1D4ED8", kind: "agent", desk: 9 },
 ];
 
 export const CLAUDE: AgentIdentity = {
@@ -63,17 +67,22 @@ export const PIXEL_MAPS: Record<string, PixelMap> = {
     rows: [".A.AA.A.", "AAAAAAAA", "HHHHHHHH", "HSSSSSSH", "SSESSESS", "SSSSSSSS", "SSSMMSSS", "SSSSSSSS"],
     palette: { S: SKIN, E: EYE, M: MOUTH, H: "#2B1D14", A: "#F5C542" },
   },
-  pratama_cto: {
+  goku_cto: {
     rows: ["HHHHHHHH", "HHHHHHHH", "HSSSSSSH", "SSSSSSSS", "SGEGGEGS", "SSSSSSSS", "SSSMMSSS", "SSSSSSSS"],
     palette: { S: SKIN, E: EYE, M: MOUTH, H: "#1A1A1A", G: GLASSES },
   },
-  bagas_dev_lead: {
+  kuririn_dev_lead: {
     rows: ["AAAAAAAA", "AAAAAAAA", "HSSSSSSH", "SSSSSSSS", "SSESSESS", "SSSSSSSS", "SSSMMSSS", "SSSSSSSS"],
     palette: { S: SKIN, E: EYE, M: MOUTH, H: "#3A2A1E", A: "#1F2937" },
   },
-  susi_uiux: {
+  bulma_uiux: {
     rows: ["..AAAAA.", "AAAAAAAA", "HHHHHHHH", "HSSSSSSH", "HSESSESH", "HSSSSSSH", "HSSMMSSH", "HSSSSSSH"],
     palette: { S: SKIN, E: EYE, M: MOUTH, H: "#4A2C1F", A: "#BE185D" },
+  },
+  bejita_video_editor: {
+    // spiky upswept black hair with a sharp widow's peak, stern brows
+    rows: ["H.H.H.HH", "HHHHHHHH", "HHHSSHHH", "HSSSSSSH", "SBBSSBBS", "SSESSESS", "SSSMMSSS", "SSSSSSSS"],
+    palette: { S: SKIN, E: EYE, M: MOUTH, H: "#14141F", B: "#14141F" },
   },
   [CLAUDE_ID]: {
     rows: ["...A....", "...A....", "DDDDDDDD", "DFFFFFFD", "DFOFFOFD", "DFFFFFFD", "DFFOOFFD", "DDDDDDDD"],

@@ -15,7 +15,7 @@ import { setParams, useRoute } from "../lib/router";
 import { relative, useNow } from "../lib/time";
 import { CLAUDE_AGENT_ID, OfficeScene3D, STATUS, webglAvailable, type AgentStatus, type Preset } from "../office/OfficeScene3D";
 import { readTod, store, TOD_KEY, type TimeOfDay } from "../office/palettes";
-import { AGENTS, identity, rosterIndex } from "../theme/agents";
+import { identity, rosterIndex } from "../theme/agents";
 
 const PRESETS: { p: Preset; label: string; title: string }[] = [
   { p: "workspace", label: "Lantai 1", title: "Lantai 1: Ruang Kerja, Meeting, Tamu, Island Hangout (Lantai 2 disembunyikan)" },
@@ -112,9 +112,9 @@ export default function Office() {
     const ids: string[] = [];
     if (data) {
       [...data.agents].sort((a, b) => rosterIndex(a.name) - rosterIndex(b.name)).forEach((a) => {
-        const ident = identity(a.name), ri = rosterIndex(a.name);
+        const ident = identity(a.name);
         s.setAgentState(a.name, officeStatus(a.state), a.display_name || ident.displayName, hermesTask(a), {
-          role: known(ident.role), color: ident.hex, desk: ri < AGENTS.length ? ri : undefined,
+          role: known(ident.role), color: ident.hex, desk: ident.desk,
           lastActive: a.last_activity_at, reason: a.state_reason,
         });
         ids.push(a.name);

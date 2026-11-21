@@ -19,8 +19,8 @@ trimmed from an actual response unless it says "illustrative".
 - **Timestamps.** `*_iso` fields and `generated_at` are ISO-8601 UTC. Raw `started_at`,
   `last_activity_at`, etc. on sessions are unix epoch seconds (float). Cron times are ISO strings
   with offsets (`+07:00`) exactly as Hermes stored them. Show them in WIB on screen.
-- **Profiles.** There are 4: `bagas_dev_lead`, `default` (Hawa The Second, data at `~/.hermes`
-  itself), `pratama_cto`, `susi_uiux`. Lists are sorted by profile name. Use `display_name`
+- **Profiles.** There are 4: `kuririn_dev_lead`, `default` (Hawa The Second, data at `~/.hermes`
+  itself), `goku_cto`, `bulma_uiux`. Lists are sorted by profile name. Use `display_name`
   for people-facing labels.
 - **State vocabulary** (lowercase everywhere in v2):
   - office/agent state: `working | reviewing | idle | offline | unknown`
@@ -41,7 +41,7 @@ trimmed from an actual response unless it says "illustrative".
 ```ts
 type ISODate = string;          // ISO-8601
 type Epoch = number;            // unix seconds, float
-type ProfileName = string;      // "bagas_dev_lead" | "default" | "pratama_cto" | "susi_uiux" | ...
+type ProfileName = string;      // "kuririn_dev_lead" | "default" | "goku_cto" | "bulma_uiux" | ...
 type AgentState = "working" | "reviewing" | "idle" | "offline" | "unknown";
 type GatewayStatus = "running" | "stopped" | "unknown";
 type ToolState = "working" | "idle" | "unknown";
@@ -122,7 +122,7 @@ interface OfficeAgent {
 }
 ```
 
-Desk order today: 0 `bagas_dev_lead`, 1 `default` (Hawa), 2 `pratama_cto`, 3 `susi_uiux`.
+Desk order today: 0 `kuririn_dev_lead`, 1 `default` (Hawa), 2 `goku_cto`, 3 `bulma_uiux`.
 `agent_color` is the dark-theme reference value. 2D UI should use the theme-aware CSS tokens
 (`--agent-hawa`, etc.). The 3D scene can use the hex directly, since it always renders dark.
 
@@ -130,10 +130,10 @@ Desk order today: 0 `bagas_dev_lead`, 1 `default` (Hawa), 2 `pratama_cto`, 3 `su
 {
   "agents": [
     {
-      "name": "bagas_dev_lead",
+      "name": "kuririn_dev_lead",
       "display_name": "Bagas Developer Lead yang menjadi leader para developer",
       "state": "idle",
-      "state_reason": "gateway running; no Running/Review task assigned to bagas_dev_lead among 0 kanban task(s)",
+      "state_reason": "gateway running; no Running/Review task assigned to kuririn_dev_lead among 0 kanban task(s)",
       "current_task": null,
       "current_task_id": null,
       "last_activity": "receiving stream response",
@@ -368,7 +368,7 @@ interface MemoryFile {
   sha256: string | null;
   updated_at: ISODate | null;          // file mtime
   identical_to_default: boolean | null; // byte-identical to default profile's file; null = n/a
-  source: string;                       // e.g. "~/.hermes/profiles/susi_uiux/memories/MEMORY.md"
+  source: string;                       // e.g. "~/.hermes/profiles/bulma_uiux/memories/MEMORY.md"
 }
 ```
 Entries in MEMORY.md are separated by a line containing only `§` (split client-side, per the design spec).
@@ -377,18 +377,18 @@ Today's state:
 | profile | MEMORY.md | USER.md |
 |---|---|---|
 | default | exists (1297 B) | exists (205 B) |
-| pratama_cto | exists, own content | missing |
-| susi_uiux | exists, `identical_to_default: true` | exists, `identical_to_default: true` |
-| bagas_dev_lead | missing | missing |
+| goku_cto | exists, own content | missing |
+| bulma_uiux | exists, `identical_to_default: true` | exists, `identical_to_default: true` |
+| kuririn_dev_lead | missing | missing |
 
 ```json
-{"profile": "bagas_dev_lead",
+{"profile": "kuririn_dev_lead",
  "memory": {"exists": false, "content": null, "error": null, "size_bytes": null, "sha256": null,
             "updated_at": null, "identical_to_default": null,
-            "source": "~/.hermes/profiles/bagas_dev_lead/memories/MEMORY.md"},
+            "source": "~/.hermes/profiles/kuririn_dev_lead/memories/MEMORY.md"},
  "user":   {"exists": false, "content": null, "error": null, "size_bytes": null, "sha256": null,
             "updated_at": null, "identical_to_default": null,
-            "source": "~/.hermes/profiles/bagas_dev_lead/memories/USER.md"}}
+            "source": "~/.hermes/profiles/kuririn_dev_lead/memories/USER.md"}}
 ```
 
 ---
@@ -413,10 +413,10 @@ interface Skill {
 }
 ```
 ```json
-{"profile": "pratama_cto",
+{"profile": "goku_cto",
  "skills": [{"dir": "apple/apple-notes", "folder": "apple-notes", "category": "apple",
              "name": "apple-notes", "description": "Manage Apple Notes via memo CLI: create, search, edit."}],
- "count": 44, "skills_dir_present": true, "definition": "...", "source": "~/.hermes/profiles/pratama_cto/skills/"}
+ "count": 44, "skills_dir_present": true, "definition": "...", "source": "~/.hermes/profiles/goku_cto/skills/"}
 ```
 
 ---

@@ -1,14 +1,14 @@
 # Mission Control V2
 
-Local, read-only dashboard for the Hermes agent team (default/Hawa, pratama_cto,
-bagas_dev_lead, susi_uiux) with a Three.js "office" view. Successor to ~/mission-control (v1).
+Local, read-only dashboard for the Hermes agent team (default/Hawa, goku_cto, bejita_video_editor,
+kuririn_dev_lead, bulma_uiux) with a Three.js "office" view. Successor to ~/mission-control (v1).
 
 - Backend: FastAPI (Python venv) in `api/`. Reads ~/.hermes strictly read-only
   (SQLite `mode=ro` + `PRAGMA query_only`, files opened for reading only).
 - Frontend: Vite + React + TypeScript in `src/`, built to Susi's design spec
-  (`~/.hermes/profiles/susi_uiux/deliverables/mission-control-v2-design-spec.md`):
+  (`~/.hermes/profiles/bulma_uiux/deliverables/mission-control-v2-design-spec.md`):
   Dashboard, Agents, Task Board, Calendar, Activity, Memory & Knowledge, and a plain-Three.js
-  3D office (`src/office/`, lazy-loaded). Hash routes (`/#/agents?agent=pratama_cto`), since the
+  3D office (`src/office/`, lazy-loaded). Hash routes (`/#/agents?agent=goku_cto`), since the
   static mount has no SPA fallback. Token is kept in localStorage `mc.token`; a 401 clears it.
 - One port in production: 8742 serves `/health`, `/api/*` and the built frontend (`dist/`).
 - Every `/api/*` route requires `Authorization: Bearer <MISSION_CONTROL_V2_API_TOKEN>`.

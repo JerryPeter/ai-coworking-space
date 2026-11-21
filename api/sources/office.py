@@ -38,9 +38,10 @@ SESSION_ACTIVE_MIN = 10  # live lease + activity within this many minutes => wor
 # Frontend should prefer its theme-aware CSS tokens; this is the reference value for the 3D scene.
 AGENT_COLORS = {
     "default": "#A78BFA",         # --agent-hawa
-    "pratama_cto": "#38BDF8",     # --agent-pratama
-    "bagas_dev_lead": "#84CC16",  # --agent-bagas
-    "susi_uiux": "#F472B6",       # --agent-susi
+    "goku_cto": "#38BDF8",     # --agent-goku
+    "kuririn_dev_lead": "#84CC16",  # --agent-kuririn
+    "bulma_uiux": "#F472B6",       # --agent-bulma
+    "bejita_video_editor": "#3B82F6",  # --agent-bejita
 }
 CLAUDE_TOOL_COLOR = "#F97316"     # --agent-claude
 FALLBACK_COLOR = "#9AA0A6"        # unknown/new profile: placeholder until Susi assigns one

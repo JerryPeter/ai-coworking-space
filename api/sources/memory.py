@@ -2,7 +2,7 @@
 
 - MEMORY.md = the agent's own notes; USER.md = what the agent knows about the user.
 - Content is returned verbatim. Non-UTF-8 bytes are reported as an error, never shown lossily.
-- A missing file is `exists: False` (not an error) — e.g. bagas_dev_lead currently has neither.
+- A missing file is `exists: False` (not an error) — e.g. kuririn_dev_lead currently has neither.
 - sha256 of the raw bytes lets the UI detect a file cloned byte-for-byte from another profile.
 """
 import hashlib
