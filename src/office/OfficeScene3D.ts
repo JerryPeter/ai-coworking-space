@@ -229,35 +229,35 @@ function readRosterTab(): RosterTab {
   try { return localStorage.getItem(ROSTER_TAB_KEY) === "rooms" ? "rooms" : "agents"; } catch { return "agents"; }
 }
 /** Room navigation shortcuts: label centres from townhall.ts roomLabel() (floor-plan px). Toilet/Gudang/Tangga left out. */
-interface RoomNav { name: string; floor: 1 | 2; px: number; pz: number }
+interface RoomNav { name: string; icon: string; floor: 1 | 2; px: number; pz: number }
 const ROOMS: RoomNav[] = [
-  { name: "Ruang Meeting Utama", floor: 1, px: 712, pz: 470 },
-  { name: "Lounge & Ruang Tamu", floor: 1, px: 850, pz: 840 },
-  { name: "Pantry & Café", floor: 1, px: 1330, pz: 600 },
-  { name: "Ruang Kerja", floor: 1, px: 1677, pz: 560 },
-  { name: "Ruang Manager", floor: 1, px: 1745, pz: 860 },
-  { name: "Ruang Manager 2", floor: 1, px: 1745, pz: 1000 },
-  { name: "Ruang Staf A", floor: 1, px: 545, pz: 1060 },
-  { name: "Ruang Staf B", floor: 1, px: 545, pz: 1250 },
-  { name: "Meeting Room Borland", floor: 1, px: 578, pz: 1370 },
-  { name: "Meeting Room Kylix", floor: 1, px: 578, pz: 1500 },
-  { name: "Meeting Room Niklaus Wirth", floor: 1, px: 590, pz: 1642 },
-  { name: "Pojok Baca", floor: 1, px: 995, pz: 1060 },
-  { name: "Lounge", floor: 1, px: 1010, pz: 1215 },
-  { name: "Ruang Tamu VIP", floor: 1, px: 995, pz: 1430 },
-  { name: "Lobby & Resepsionis", floor: 1, px: 950, pz: 1630 },
-  { name: "Pos Satpam", floor: 1, px: 1275, pz: 1805 },
-  { name: "Ruang CEO", floor: 2, px: 545, pz: 430 },
-  { name: "Meeting Room Delphi", floor: 2, px: 784, pz: 389 },
-  { name: "Meeting Room Pascal", floor: 2, px: 1045, pz: 389 },
-  { name: "Ruang CTO", floor: 2, px: 1566, pz: 400 },
-  { name: "Ruang COO", floor: 2, px: 1725, pz: 400 },
-  { name: "Area Kerja Agen", floor: 2, px: 980, pz: 800 },
-  { name: "Area Kolaborasi", floor: 2, px: 1600, pz: 600 },
-  { name: "Ruang Training", floor: 2, px: 1590, pz: 935 },
-  { name: "Perpustakaan & Lounge", floor: 2, px: 720, pz: 1250 },
-  { name: "Coffee Corner", floor: 2, px: 760, pz: 1600 },
-  { name: "Pantry L2", floor: 2, px: 1335, pz: 400 },
+  { name: "Ruang Meeting Utama", icon: "🏛️", floor: 1, px: 712, pz: 470 },
+  { name: "Lounge & Ruang Tamu", icon: "🛋️", floor: 1, px: 850, pz: 840 },
+  { name: "Pantry & Café", icon: "🍽️", floor: 1, px: 1330, pz: 600 },
+  { name: "Ruang Kerja", icon: "💻", floor: 1, px: 1677, pz: 560 },
+  { name: "Ruang Manager", icon: "👔", floor: 1, px: 1745, pz: 860 },
+  { name: "Ruang Manager 2", icon: "👔", floor: 1, px: 1745, pz: 1000 },
+  { name: "Ruang Staf A", icon: "🧑‍💼", floor: 1, px: 545, pz: 1060 },
+  { name: "Ruang Staf B", icon: "🧑‍💼", floor: 1, px: 545, pz: 1250 },
+  { name: "Meeting Room Borland", icon: "🤝", floor: 1, px: 578, pz: 1370 },
+  { name: "Meeting Room Kylix", icon: "🤝", floor: 1, px: 578, pz: 1500 },
+  { name: "Meeting Room Niklaus Wirth", icon: "🤝", floor: 1, px: 590, pz: 1642 },
+  { name: "Pojok Baca", icon: "📖", floor: 1, px: 995, pz: 1060 },
+  { name: "Lounge", icon: "🛋️", floor: 1, px: 1010, pz: 1215 },
+  { name: "Ruang Tamu VIP", icon: "⭐", floor: 1, px: 995, pz: 1430 },
+  { name: "Lobby & Resepsionis", icon: "🛎️", floor: 1, px: 950, pz: 1630 },
+  { name: "Pos Satpam", icon: "👮", floor: 1, px: 1275, pz: 1805 },
+  { name: "Ruang CEO", icon: "👑", floor: 2, px: 545, pz: 430 },
+  { name: "Meeting Room Delphi", icon: "🤝", floor: 2, px: 784, pz: 389 },
+  { name: "Meeting Room Pascal", icon: "🤝", floor: 2, px: 1045, pz: 389 },
+  { name: "Ruang CTO", icon: "🛠️", floor: 2, px: 1566, pz: 400 },
+  { name: "Ruang COO", icon: "📊", floor: 2, px: 1725, pz: 400 },
+  { name: "Area Kerja Agen", icon: "🤖", floor: 2, px: 980, pz: 800 },
+  { name: "Area Kolaborasi", icon: "💡", floor: 2, px: 1600, pz: 600 },
+  { name: "Ruang Training", icon: "🎓", floor: 2, px: 1590, pz: 935 },
+  { name: "Perpustakaan & Lounge", icon: "📚", floor: 2, px: 720, pz: 1250 },
+  { name: "Coffee Corner", icon: "☕", floor: 2, px: 760, pz: 1600 },
+  { name: "Pantry L2", icon: "🍽️", floor: 2, px: 1335, pz: 400 },
 ];
 /** Camera distance from a room centre when flying to it, and the radius that counts as "in" the room (world units). */
 const ROOM_CAM_DIST = 12, ROOM_NEAR = 3;
@@ -1285,7 +1285,9 @@ export class OfficeScene3D {
       label.id = idBase + "-l" + floor; ul.setAttribute("aria-labelledby", label.id);
       ROOMS.forEach((r, i) => {
         if (r.floor !== floor) return;
-        const li = el("li"), b = el("button", "room-entry", r.name); b.type = "button";
+        const li = el("li"), b = el("button", "room-entry"); b.type = "button";
+        const ic = el("span", "room-icon", r.icon); ic.setAttribute("aria-hidden", "true");
+        b.append(ic, el("span", "room-name", r.name));
         b.title = "Pindah kamera ke " + r.name + " (lantai " + floor + ")";
         b.addEventListener("click", () => this.goToRoom(i));
         this.roomEntries[i] = b; li.appendChild(b); ul.appendChild(li);
