@@ -39,6 +39,13 @@ export const STATUS: Record<AgentStatus, { label: string; color: string; use: st
   error: { label: "Tidak diketahui", color: "#ef4b4b", use: "desk" },
 };
 
+/** Compact name shown above an agent: first name plus a concise, lowercase role. */
+function officeLabel(name: string, role: string): string {
+  const firstName = name.trim().split(/\s+/)[0] || name;
+  const shortRole = role.trim().toLowerCase();
+  return shortRole ? `${firstName}, ${shortRole}` : firstName;
+}
+
 export const CLAUDE_AGENT_ID = "claude_cli";
 const CLAUDE_COLOR = "#F97316";
 
@@ -672,7 +679,8 @@ export class OfficeScene3D {
   // ================================================================== agents
   private drawTag(a: Agent3D, pulse?: number) {
     const t = a.tag, col = STATUS[a.data.status].color;
-    if (t.name.textContent !== a.data.name) t.name.textContent = a.data.name;
+    const label = officeLabel(a.data.name, a.data.role);
+    if (t.name.textContent !== label) t.name.textContent = label;
     t.el.title = a.data.name + " · " + STATUS[a.data.status].label;
     t.el.classList.toggle("sel", a === this.selected);
     t.el.classList.toggle("dim", a.data.status === "offline");
