@@ -551,6 +551,32 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text-primar
 .office .o3d-list button.o3d-off .o3d-avatar img { filter: grayscale(.7) brightness(.8); }
 @media (max-width: 1100px) { .th-bar { max-width: calc(100% - 32px); } .office .o3d-roster { top: 72px; } .office .o3d-toggle { top: 78px; } .office .o3d-toggle.closed { top: 72px; } }
 @media (max-width: 780px) { .office .o3d-roster { bottom: 116px; top: auto; } .th-brand span:not(.th-state) { display: none; } }
+/* ---- Room navigation panel (left): mirrors the agent roster on the right; sits below the toolbar, above the brand box. */
+.o3d-rooms { top: 72px; left: 16px; bottom: 116px; width: 240px; display: flex; flex-direction: column; overflow: hidden; color: var(--text-primary); }
+.o3d-rooms { transition: transform 240ms ease, opacity 240ms ease, visibility 0s linear 0s; }
+.o3d-rooms.closed { transform: translateX(calc(-100% - 24px)); opacity: 0; visibility: hidden; transition: transform 240ms ease, opacity 240ms ease, visibility 0s linear 240ms; }
+.o3d-rooms header { padding: 12px 44px 10px 14px; border-bottom: 1px solid var(--border-subtle); }
+.o3d-rooms h2 { margin: 0; font-size: var(--text-md, 15px); font-weight: 600; }
+.o3d-rooms-body { overflow: auto; flex: 1; min-height: 0; padding: 6px; }
+.o3d-rooms-body ul { list-style: none; margin: 0 0 6px; padding: 0; }
+.room-section-label { margin: 8px 10px 4px; font-size: var(--text-xs, 11px); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); }
+.room-entry { display: block; width: 100%; text-align: left; border: 0; background: transparent; border-radius: var(--radius-md); padding: 6px 10px; color: inherit; font-size: var(--text-sm, 13px); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.room-entry:hover { background: var(--bg-surface-hover); }
+.room-entry:focus-visible { outline: 2px solid var(--accent, var(--text-primary)); outline-offset: -2px; }
+.room-entry[aria-current="true"] { background: var(--bg-surface-hover); box-shadow: inset 0 0 0 1.5px var(--text-primary); font-weight: 600; }
+.o3d-rooms-toggle { top: 78px; left: 222px; z-index: 6; width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1; color: var(--text-secondary); cursor: pointer; transition: top 240ms ease, left 240ms ease, background-color var(--dur-fast, 120ms); }
+.o3d-rooms:not(.closed) ~ .o3d-rooms-toggle { background: transparent; box-shadow: none; border-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.o3d-rooms-toggle:hover { color: var(--text-primary); background: var(--bg-surface-hover); }
+.o3d-rooms-toggle.closed { top: 72px; left: 16px; width: 36px; height: 36px; font-size: 17px; color: var(--text-primary); }
+.office .o3d-rooms { background: color-mix(in srgb, var(--panel) 94%, transparent); color: var(--panel-fg); border-color: var(--line); }
+.office .o3d-rooms header { border-color: var(--line); }
+.office .room-section-label { color: var(--panel-dim); }
+.office .room-entry:hover, .office .room-entry[aria-current="true"] { background: var(--hover); }
+@media (max-width: 780px) {
+  .office .o3d-rooms { bottom: auto; max-height: calc(100% - 260px); width: min(220px, calc(100% - 20px)); left: 10px; }
+  .office .o3d-rooms-toggle { left: 196px; }
+  .office .o3d-rooms-toggle.closed { left: 10px; }
+}
 .nametag { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: var(--radius-pill); background: rgba(26, 30, 40, 0.85); color: #E8EAF0; font-size: 12px; font-weight: 600; white-space: nowrap; pointer-events: none; transition: transform var(--dur-fast), opacity var(--dur-base); font-family: var(--font-sans); }
 .nametag.hover { transform: scale(1.05); }
 .nametag.dim { opacity: 0.6; }

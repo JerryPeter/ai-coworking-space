@@ -11,6 +11,7 @@
 // - Claude Code CLI = the orange (#F97316) faceted octahedron mascot, floating in the far south-west corner of the Lantai 2 agent work area.
 // - OpenCode = a dark, flat-shaded icosahedron orb with a dim teal glow beside Claude Code on Lantai 2.
 // - Right-hand agent roster + detail panel (DOM, Hermes "H" / OpenClaw "OC" badges, toggle button).
+// - Left-hand room list (Lantai 1 / 2): clicking a room switches floor and flies the camera there (toggle button).
 // - Corner floor lamps that light up at night (setTimeOfDay → TownHall.setNight).
 //
 // Port notes (r128 -> r187): OrbitControls/CSS2DRenderer from three/examples/jsm; PCFSoftShadowMap is gone, so
@@ -221,6 +222,43 @@ const SIDEBAR_KEY = "mc.office.sidebarOpen";
 function readSidebarOpen() {
   try { return localStorage.getItem(SIDEBAR_KEY) !== "false"; } catch { return true; }
 }
+const ROOM_PANEL_KEY = "mc.office.roomPanelOpen";
+function readRoomPanelOpen() {
+  try { return localStorage.getItem(ROOM_PANEL_KEY) !== "false"; } catch { return true; }
+}
+/** Room navigation shortcuts: label centres from townhall.ts roomLabel() (floor-plan px). Toilet/Gudang/Tangga left out. */
+interface RoomNav { name: string; floor: 1 | 2; px: number; pz: number }
+const ROOMS: RoomNav[] = [
+  { name: "Ruang Meeting Utama", floor: 1, px: 712, pz: 470 },
+  { name: "Lounge & Ruang Tamu", floor: 1, px: 850, pz: 840 },
+  { name: "Pantry & Café", floor: 1, px: 1330, pz: 600 },
+  { name: "Ruang Kerja", floor: 1, px: 1677, pz: 560 },
+  { name: "Ruang Manager", floor: 1, px: 1745, pz: 860 },
+  { name: "Ruang Manager 2", floor: 1, px: 1745, pz: 1000 },
+  { name: "Ruang Staf A", floor: 1, px: 545, pz: 1060 },
+  { name: "Ruang Staf B", floor: 1, px: 545, pz: 1250 },
+  { name: "Meeting Room Borland", floor: 1, px: 578, pz: 1370 },
+  { name: "Meeting Room Kylix", floor: 1, px: 578, pz: 1500 },
+  { name: "Meeting Room Niklaus Wirth", floor: 1, px: 590, pz: 1642 },
+  { name: "Pojok Baca", floor: 1, px: 995, pz: 1060 },
+  { name: "Lounge", floor: 1, px: 1010, pz: 1215 },
+  { name: "Ruang Tamu VIP", floor: 1, px: 995, pz: 1430 },
+  { name: "Lobby & Resepsionis", floor: 1, px: 950, pz: 1630 },
+  { name: "Pos Satpam", floor: 1, px: 1275, pz: 1805 },
+  { name: "Ruang CEO", floor: 2, px: 545, pz: 430 },
+  { name: "Meeting Room Delphi", floor: 2, px: 784, pz: 389 },
+  { name: "Meeting Room Pascal", floor: 2, px: 1045, pz: 389 },
+  { name: "Ruang CTO", floor: 2, px: 1566, pz: 400 },
+  { name: "Ruang COO", floor: 2, px: 1725, pz: 400 },
+  { name: "Area Kerja Agen", floor: 2, px: 980, pz: 800 },
+  { name: "Area Kolaborasi", floor: 2, px: 1600, pz: 600 },
+  { name: "Ruang Training", floor: 2, px: 1590, pz: 935 },
+  { name: "Perpustakaan & Lounge", floor: 2, px: 720, pz: 1250 },
+  { name: "Coffee Corner", floor: 2, px: 760, pz: 1600 },
+  { name: "Pantry L2", floor: 2, px: 1335, pz: 400 },
+];
+/** Camera distance from a room centre when flying to it, and the radius that counts as "in" the room (world units). */
+const ROOM_CAM_DIST = 12, ROOM_NEAR = 3;
 const hex6 = (n: number) => "#" + n.toString(16).padStart(6, "0");
 /** Roster icon for Claude CLI: an orange (#F97316) diamond/hexagon mascot. */
 function drawClaudeMascotFace(state: ToolStatus): string {
@@ -301,6 +339,10 @@ export class OfficeScene3D {
   private sidebarOpen = readSidebarOpen();
   /** Roster face icons (data URLs), keyed by everything that changes the drawing. */
   private faces = new Map<string, string>();
+  // DOM: left-hand room navigation panel.
+  private rooms: { root: HTMLElement; toggle: HTMLButtonElement; entries: HTMLButtonElement[] };
+  private roomPanelOpen = readRoomPanelOpen();
+  private activeRoom = -1;
 
   constructor(private host: HTMLElement, opts: SceneOptions = {}) {
     this.opts = opts;
@@ -332,6 +374,7 @@ export class OfficeScene3D {
     this.buildGraph();
 
     this.ui = this.buildPanel();
+    this.rooms = this.buildRoomPanel();
     this.applyTheme();
 
     const c = this.renderer.domElement;
@@ -454,6 +497,7 @@ export class OfficeScene3D {
     c.remove();
     this.css.domElement.remove();
     this.ui.root.remove(); this.ui.toggle.remove();
+    this.rooms.root.remove(); this.rooms.toggle.remove();
     THREE.ColorManagement.enabled = this.prevColorManagement;
   }
 
@@ -1186,6 +1230,82 @@ export class OfficeScene3D {
     });
   }
 
+  // ================================================================== room navigation panel (DOM)
+  private buildRoomPanel() {
+    const root = el("aside", "ov o3d-rooms");
+    root.id = "o3d-rooms-" + Math.random().toString(36).slice(2, 8);
+    root.setAttribute("aria-label", "Daftar ruangan");
+    const header = el("header"), title = el("h2"), icon = el("span", "o3d-rooms-icon", "🏢");
+    icon.setAttribute("aria-hidden", "true");
+    title.append(icon, document.createTextNode(" Ruangan"));
+    header.appendChild(title);
+    const body = el("div", "o3d-rooms-body");
+    const entries: HTMLButtonElement[] = [];
+    for (const floor of [1, 2] as const) {
+      const sec = el("section"), label = el("p", "room-section-label", "Lantai " + floor), ul = el("ul");
+      label.id = root.id + "-l" + floor; ul.setAttribute("aria-labelledby", label.id);
+      ROOMS.forEach((r, i) => {
+        if (r.floor !== floor) return;
+        const li = el("li"), b = el("button", "room-entry", r.name); b.type = "button";
+        b.title = "Pindah kamera ke " + r.name + " (lantai " + floor + ")";
+        b.addEventListener("click", () => this.goToRoom(i));
+        entries[i] = b; li.appendChild(b); ul.appendChild(li);
+      });
+      sec.append(label, ul); body.appendChild(sec);
+    }
+    root.append(header, body);
+    const toggle = el("button", "ov o3d-rooms-toggle"); toggle.type = "button";
+    toggle.setAttribute("aria-controls", root.id);
+    toggle.addEventListener("click", () => this.setRoomPanel(!this.roomPanelOpen));
+    this.host.append(root, toggle);
+    const rooms = { root, toggle, entries };
+    this.applyRoomPanel(rooms);
+    return rooms;
+  }
+  private applyRoomPanel(r = this.rooms) {
+    const open = this.roomPanelOpen;
+    r.root.classList.toggle("closed", !open);
+    r.root.toggleAttribute("inert", !open);
+    r.root.setAttribute("aria-hidden", open ? "false" : "true");
+    r.toggle.classList.toggle("closed", !open);
+    r.toggle.textContent = open ? "✕" : "🏢";
+    r.toggle.title = open ? "Sembunyikan daftar ruangan" : "Tampilkan daftar ruangan";
+    r.toggle.setAttribute("aria-label", r.toggle.title);
+    r.toggle.setAttribute("aria-expanded", String(open));
+  }
+  private setRoomPanel(open: boolean) {
+    if (open === this.roomPanelOpen) return;
+    this.roomPanelOpen = open;
+    try { localStorage.setItem(ROOM_PANEL_KEY, String(open)); } catch { /* storage unavailable */ }
+    this.applyRoomPanel();
+  }
+  /** Room shortcut: show the room's floor, then fly the camera to the room keeping the current heading. */
+  private goToRoom(i: number) {
+    const r = ROOMS[i]; if (!r) return;
+    if (this.th.mode !== r.floor) { this.th.setMode(r.floor); this.opts.onPresetChange?.(r.floor); }
+    const t = new THREE.Vector3(wx(r.px), this.targetY(r.floor), wz(r.pz));
+    const dir = this.camera.position.clone().sub(this.controls.target);
+    if (dir.lengthSq() < 1e-6) dir.copy(HOME_CAM).sub(HOME_TGT);
+    dir.normalize();
+    // Keep the heading but never look flatter than ~37° from horizontal (like the default view).
+    if (dir.y < 0.6) { dir.y = 0; if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1); dir.normalize().multiplyScalar(0.8); dir.y = 0.6; }
+    this.flyTo(t, t.clone().add(dir.normalize().multiplyScalar(ROOM_CAM_DIST)), 0.9);
+  }
+  /** Highlight the room the camera target is in (nearest room centre on the shown floor, within ROOM_NEAR). */
+  private updateActiveRoom() {
+    const m = this.th.mode, t = this.tween ? this.tween.tt : this.controls.target;
+    let best = -1, bestD = ROOM_NEAR;
+    if (m === 1 || m === 2) ROOMS.forEach((r, i) => {
+      if (r.floor !== m) return;
+      const d = Math.hypot(wx(r.px) - t.x, wz(r.pz) - t.z);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    if (best === this.activeRoom) return;
+    this.rooms.entries[this.activeRoom]?.removeAttribute("aria-current");
+    this.rooms.entries[best]?.setAttribute("aria-current", "true");
+    this.activeRoom = best;
+  }
+
   // ================================================================== camera / floors
   private flyTo(t: THREE.Vector3, p: THREE.Vector3, dur = 0.7) {
     if (this.reduce) { this.controls.target.copy(t); this.camera.position.copy(p); this.tween = null; return; }
@@ -1278,6 +1398,7 @@ export class OfficeScene3D {
     if (this.detailClock > 1) { this.detailClock = 0; if (this.selected) this.renderDetail(); }
     if (this.dirty) { this.dirty = false; this.renderRoster(); }
     this.updateLabels();
+    this.updateActiveRoom();
     this.renderer.render(this.scene, this.camera);
     this.css.render(this.scene, this.camera);
     if (!this.firstFrame) { this.firstFrame = true; this.opts.onFirstFrame?.(); }
