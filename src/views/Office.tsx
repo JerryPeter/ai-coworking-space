@@ -288,7 +288,7 @@ export default function Office() {
           </div>
         )}
         <div className="ov ov-bl th-brand">
-          <b>JRRYPTR</b>
+          <b>OFFICE</b>
           <span title="Seret untuk memutar · gulir untuk zoom · klik kanan untuk menggeser · klik agent untuk detail">Kantor virtual 3D · klik agent untuk detail</span>
           <span className="tabular th-state">
             {office.updatedAt ? `State updated ${relative(office.updatedAt, now)} · every 5s` : "Loading state…"}
