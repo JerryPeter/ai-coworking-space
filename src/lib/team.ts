@@ -3,6 +3,7 @@ import { endpoints, useApi } from "../api/client";
 import type { Agent, CronJob, OfficeAgent, OpenClawAgent, Session, Tool } from "../api/types";
 import { identity, rosterIndex, type AgentIdentity } from "../theme/agents";
 import { jobFailing, sessionsByProfile, sessionsToday } from "./derive";
+import { toDate } from "./time";
 
 // Same order/id scheme as src/views/Office.tsx.
 const OPENCLAW_ORDER = ["chief", "researcher", "writer", "reviewer"];
@@ -93,3 +94,28 @@ export function useTeam(officeInterval = 30_000) {
 }
 
 export type Team = ReturnType<typeof useTeam>;
+
+// Card status used for sorting/filtering on the Agents page (t_f8e0064a).
+export type AgentStatus = "working" | "idle" | "offline" | "error";
+export const STATUS_RANK: Record<AgentStatus, number> = { working: 0, idle: 1, offline: 2, error: 3 };
+const RECENT_MS = 5 * 60_000;
+
+/** Hermes never yields "error": Agent.status is a GatewayStatus (running|stopped|unknown) with no error field.
+ *  "Active session" = office state working/reviewing (there is no "busy" state) or the newest session has no ended_at. */
+export function hermesStatus(m: TeamMember, now = Date.now()): AgentStatus {
+  if (!m.agent || m.agent.status === "stopped") return "offline";
+  const st = m.office?.state;
+  if (st === "working" || st === "reviewing") return "working";
+  const latest = m.sessions[0];
+  if (latest && latest.started_at != null && latest.ended_at == null) return "working";
+  const t = toDate(m.lastActive)?.getTime();
+  if (t != null && now - t <= RECENT_MS) return "working";
+  return "idle";
+}
+
+export function openclawStatus(a: OpenClawAgent): AgentStatus {
+  if (a.is_running === true) return "working";
+  if (a.gateway_status === "running") return "idle";
+  if (a.error) return "error";
+  return "offline";
+}

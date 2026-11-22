@@ -669,3 +669,36 @@ table.simple td { padding: 8px; border-bottom: 1px solid var(--border-subtle); }
 .o3d-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .o3d-name > .truncate { min-width: 0; }
 .o3d-fw { flex: none; font-size: 10px; font-weight: 700; line-height: 14px; padding: 1px 5px; border-radius: 4px; }
+
+/* Agents filters (t_f8e0064a) */
+.agents-filters { margin-bottom: var(--space-2); }
+.agents-filters .team-filter-bar { margin-bottom: var(--space-2); }
+.filter-count { font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* Workflow (t_b9f7d656) */
+.wf-title { margin: 0; font-size: var(--text-2xl); line-height: var(--lh-2xl); font-weight: 700; }
+.wf-card { padding: var(--space-4); }
+.wf-flow-title { margin: 0 0 var(--space-3); font-size: var(--text-lg); line-height: var(--lh-lg); font-weight: 600; }
+.wf-list { list-style: none; margin: 0 0 0 7px; padding: 0 0 0 var(--space-6); border-left: 1px solid var(--border-default); }
+.wf-list.wf-root { margin-left: 0; padding-left: 0; border-left: 0; }
+.wf-item { position: relative; padding: 6px 0; }
+.wf-list:not(.wf-root) > .wf-item::before {
+  content: ""; position: absolute; left: calc(var(--space-6) * -1); top: 17px;
+  width: calc(var(--space-6) - 4px); border-top: 1px solid var(--border-default);
+}
+.wf-node { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: var(--text-sm); }
+.wf-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px var(--bg-surface); }
+.wf-name { font-weight: 600; color: var(--text-primary); }
+.wf-desc { color: var(--text-secondary); }
+.wf-table-wrap { overflow-x: auto; }
+.wf-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: var(--text-sm); }
+.wf-table th, .wf-table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); }
+.wf-table th { color: var(--text-muted); font-weight: 600; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.04em; }
+.wf-table td:first-child { color: var(--text-secondary); }
+.wf-table td:last-child { color: var(--text-primary); font-weight: 500; }
+@media (max-width: 640px) {
+  .wf-list { margin-left: 4px; padding-left: var(--space-3); }
+  .wf-list:not(.wf-root) > .wf-item::before { left: calc(var(--space-3) * -1); width: calc(var(--space-3) - 2px); }
+  .wf-node { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .wf-title { font-size: var(--text-xl); line-height: var(--lh-xl); }
+}

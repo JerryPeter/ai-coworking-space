@@ -16,10 +16,10 @@ export const NAV: NavDef[] = [
   { id: "dashboard", label: "Dashboard", title: "Dashboard", Icon: LayoutDashboard, key: "d" },
   { id: "agents", label: "Agents", title: "Agents", Icon: Users, key: "a" },
   { id: "tasks", label: "Task Board", title: "Task Board", Icon: SquareKanban, key: "t" },
-  { id: "workflow", label: "Workflow", title: "Workflow", Icon: Workflow, key: "w" },
   { id: "calendar", label: "Calendar", title: "Calendar", Icon: CalendarDays, key: "c" },
   { id: "activity", label: "Activity", title: "Activity", Icon: Activity, key: "v" },
   { id: "memory", label: "Memory", title: "Memory & Knowledge", Icon: Brain, key: "m" },
+  { id: "workflow", label: "Workflow", title: "Alur Kerja Tim", Icon: Workflow, key: "w" },
   { id: "office", label: "3D Office", title: "3D Office", Icon: Box, key: "o" },
 ];
 
@@ -57,7 +57,7 @@ export function AppShell({ children, subtitle }: { children: ReactNode; subtitle
   const toggleRef = useRef(toggleSidebar);
   toggleRef.current = toggleSidebar;
 
-  // Keyboard: "[" toggles the sidebar; "g" then d/a/t/w/c/v/m/o navigates (spec 8).
+  // Keyboard: "[" toggles the sidebar; "g" then d/a/t/c/v/m/w/o navigates (spec 8).
   useEffect(() => {
     let gAt = 0;
     const onKey = (e: KeyboardEvent) => {
@@ -114,7 +114,7 @@ export function AppShell({ children, subtitle }: { children: ReactNode; subtitle
         <nav className="nav">
           {NAV.map((n) => (
             <NavItem key={n.id} def={n} active={view === n.id} collapsed={collapsed}
-              badge={n.id === "dashboard" && failing > 0 ? <span className="nav-badge-dot" title={`${failing} failing cron job${failing > 1 ? "s" : ""}`} /> : n.id === "tasks" && openTasks ? <span className="nav-count fade-label">{openTasks}</span> : null}
+              badge={n.id === "dashboard" && failing > 0 ? <span className="nav-badge-dot" title={`${failing} failing cron job${failing > 1 ? "s" : ""}`} /> : n.id === "tasks" && openTasks ? <span className="nav-count">{openTasks}</span> : null}
               onNavigate={() => { if (narrow) setNarrowExpanded(false); }} />
           ))}
         </nav>
