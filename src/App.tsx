@@ -13,6 +13,7 @@ import Calendar from "./views/Calendar";
 import Dashboard from "./views/Dashboard";
 import Memory from "./views/Memory";
 import TaskBoard from "./views/TaskBoard";
+import TokenMonitor from "./views/TokenMonitor";
 import WorkflowView from "./views/Workflow";
 
 // The 3D office pulls in Three.js; lazy-load it so other views don't pay for it.
@@ -34,6 +35,7 @@ export default function App() {
       {view === "agents" && <Agents />}
       {view === "tasks" && <TaskBoard />}
       {view === "workflow" && <WorkflowView />}
+      {view === "token-monitor" && <TokenMonitor />}
       {view === "calendar" && <Calendar />}
       {view === "activity" && <Activity />}
       {view === "memory" && <Memory />}

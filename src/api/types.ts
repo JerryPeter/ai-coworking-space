@@ -226,3 +226,31 @@ export interface OpenClawAgentsResponse {
   error: string | null;
   source: string;
 }
+
+// GET /api/usage/summary?days=N (api/sources/usage.py). total_tokens = input + output (cache excluded).
+export interface UsageBucket {
+  sessions: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+  actual_cost_usd: number;
+}
+export interface UsageSummary {
+  generated_at: string;
+  timezone: string | null;
+  window_days: number;
+  totals: { all_time: UsageBucket; today: UsageBucket; last_7_days: UsageBucket; window: UsageBucket };
+  by_model: (UsageBucket & { model: string })[];
+  by_profile: (UsageBucket & { profile: string })[];
+  daily: (UsageBucket & { date: string })[];
+  active_sessions: number;
+  profiles: { profile: string; available: boolean; error: string | null; sessions: number; active_sessions: number }[];
+  opencode: {
+    available: boolean; provider: string | null; model: string | null; source: string; error: string | null;
+    cost_available: false; note: string;
+  };
+  source: string;
+}

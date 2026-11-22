@@ -702,3 +702,7 @@ table.simple td { padding: 8px; border-bottom: 1px solid var(--border-subtle); }
   .wf-node { flex-direction: column; align-items: flex-start; gap: 2px; }
   .wf-title { font-size: var(--text-xl); line-height: var(--lh-xl); }
 }
+
+/* Token Monitor: five overview tiles share one row when there is room */
+.tiles.tm-tiles { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.tiles.tm-tiles .tile { grid-column: auto; }
