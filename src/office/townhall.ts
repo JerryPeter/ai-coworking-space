@@ -825,9 +825,15 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     for (let i = 0; i < 6; i++) bx(f, cw - 0.3, 0.02, 0.18, "#4a4f55", ccx, cy0 - 0.01, z0 + 0.45 + i * 0.45, false);
     for (let i = 0; i < 5; i++) bx(f, 0.5, 0.015, 0.12, lampMat, ccx - 2.6 + i * 1.3, cy0 - 0.02, z0 + 1.6, false);
     bx(f, cw, 0.12, 0.08, "#1c1e21", ccx, cy0 + 0.38, z0 + cd + 0.06, false);
-    // "OFFICE" letters standing on the canopy
+    // "AGENT OFFICE" letters standing on the canopy (shrink-to-fit: max 300px, text width ≤ 1900px of 2048)
     const lc = document.createElement("canvas"); lc.width = 2048; lc.height = 320;
-    { const x = lc.getContext("2d")!; x.clearRect(0, 0, 2048, 320); x.fillStyle = "#ffffff"; x.textAlign = "center"; x.textBaseline = "middle"; x.font = '800 240px "Plus Jakarta Sans", Arial, sans-serif'; x.fillText("AGENT OFFICE", 1024, 170); }
+    {
+      const x = lc.getContext("2d")!; x.clearRect(0, 0, 2048, 320); x.fillStyle = "#ffffff"; x.textAlign = "center"; x.textBaseline = "middle";
+      const lf = (s: number) => `800 ${s}px "Plus Jakarta Sans", Arial, sans-serif`;
+      let fs = 300; x.font = lf(fs);
+      const w = x.measureText("AGENT OFFICE").width; if (w > 1900) { fs = Math.floor((fs * 1900) / w); x.font = lf(fs); }
+      x.fillText("AGENT OFFICE", 1024, 170);
+    }
     const ltex = new THREE.CanvasTexture(lc);
     const lw2 = 6.2, lh2 = (lw2 * 320) / 2048;
     for (let k2 = 0; k2 < 6; k2++) {
