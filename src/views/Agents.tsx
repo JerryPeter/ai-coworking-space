@@ -1,5 +1,4 @@
 // Agents roster (spec 6.2): Hermes → tool card → OpenClaw; each group sorted by status, then name (t_f8e0064a).
-import { Search } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { endpoints, refetch, useApi } from "../api/client";
 import type { OpenClawAgent } from "../api/types";
@@ -12,12 +11,12 @@ import { useNow } from "../lib/time";
 type Framework = "hermes" | "openclaw";
 type PlatformFilter = "all" | Framework;
 type StatusFilter = "all" | "working" | "idle" | "offline";
-interface Filters { platform: PlatformFilter; status: StatusFilter; search: string }
+interface Filters { platform: PlatformFilter; status: StatusFilter }
 
 const FILTER_KEY = "mc.agents.filter";
 const PLATFORMS: [PlatformFilter, string][] = [["all", "Semua"], ["hermes", "Hermes"], ["openclaw", "OpenClaw"]];
 const STATUSES: [StatusFilter, string][] = [["all", "Semua"], ["working", "Working"], ["idle", "Idle"], ["offline", "Offline"]];
-const DEFAULTS: Filters = { platform: "all", status: "all", search: "" };
+const DEFAULTS: Filters = { platform: "all", status: "all" };
 
 function readFilters(): Filters {
   try {
@@ -25,16 +24,14 @@ function readFilters(): Filters {
     return {
       platform: PLATFORMS.some(([k]) => k === v.platform) ? v.platform : "all",
       status: STATUSES.some(([k]) => k === v.status) ? v.status : "all",
-      search: typeof v.search === "string" ? v.search : "",
     };
   } catch { return DEFAULTS; }
 }
 
-/** One sortable/filterable row; `names` are the strings the search box matches. */
-interface Row { key: string; fw: Framework; status: AgentStatus; name: string; names: string[]; m?: TeamMember; a?: OpenClawAgent }
+/** One sortable/filterable row. */
+interface Row { key: string; fw: Framework; status: AgentStatus; name: string; m?: TeamMember; a?: OpenClawAgent }
 
 const statusOk = (f: StatusFilter, s: AgentStatus) => f === "all" || f === s || (f === "offline" && s === "error");
-const searchOk = (q: string, names: string[]) => !q || names.some((n) => n.toLowerCase().includes(q));
 const byStatusName = (x: Row, y: Row) => STATUS_RANK[x.status] - STATUS_RANK[y.status] || x.name.localeCompare(y.name);
 
 // Framework badge, overlaid on the card's top-right edge so the card component itself stays untouched.
@@ -61,24 +58,21 @@ export default function Agents() {
   const set = (p: Partial<Filters>) => setF((cur) => ({ ...cur, ...p }));
 
   const hermesRows: Row[] = team.members.map((m) => ({
-    key: m.id, fw: "hermes", status: hermesStatus(m, now), name: m.ident.displayName,
-    names: [m.ident.displayName, m.ident.shortName, m.id], m,
+    key: m.id, fw: "hermes", status: hermesStatus(m, now), name: m.ident.displayName, m,
   }));
   const ocRows: Row[] = (oc.data?.agents ?? []).map((a) => ({
-    key: a.name, fw: "openclaw", status: openclawStatus(a), name: a.display_name || a.name,
-    names: [a.display_name, a.name], a,
+    key: a.name, fw: "openclaw", status: openclawStatus(a), name: a.display_name || a.name, a,
   }));
   const all = [...hermesRows, ...ocRows];
-  const q = f.search.trim().toLowerCase();
-  const match = (r: Row, x: Filters) => (x.platform === "all" || x.platform === r.fw) && statusOk(x.status, r.status) && searchOk(q, r.names);
+  const match = (r: Row, x: Filters) => (x.platform === "all" || x.platform === r.fw) && statusOk(x.status, r.status);
   const count = (p: Partial<Filters>) => all.filter((r) => match(r, { ...f, ...p })).length;
   const hermes = hermesRows.filter((r) => match(r, f)).sort(byStatusName);
   const openclaw = ocRows.filter((r) => match(r, f)).sort(byStatusName);
 
   const showHermes = f.platform !== "openclaw";
   const showOc = f.platform !== "hermes";
-  const showTool = showHermes && f.status === "all" && searchOk(q, ["Claude CLI", "Claude Code CLI", "claude_cli"]);
-  const filtered = f.platform !== "all" || f.status !== "all" || q !== "";
+  const showTool = showHermes && f.status === "all";
+  const filtered = f.platform !== "all" || f.status !== "all";
   const hermesLoading = team.loading && !n;
   // Loading or failed sections keep their skeleton/error panel instead of the "no match" empty state.
   const hermesBusy = showHermes && (hermesLoading || (!!team.error && !n));
@@ -102,12 +96,6 @@ export default function Agents() {
         </div>
         <div className="team-filter-bar" role="group" aria-label="Status">
           {STATUSES.map(([k, l]) => btn(f.status === k, l, count({ status: k }), () => set({ status: k }), k))}
-        </div>
-        <div className="team-filter-bar">
-          <label className="search-wrap"><Search size={14} />
-            <input type="search" className="search-input" style={{ width: 240 }} placeholder="Cari agent..." aria-label="Cari agent"
-              value={f.search} onChange={(e) => set({ search: e.target.value })} />
-          </label>
         </div>
       </div>
       {nothing ? (
