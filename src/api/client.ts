@@ -7,7 +7,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import type {
   AgentsResponse, CronJobsResponse, CronRunsResponse, DashboardSummary, KanbanResponse,
   MemoryResponse, OfficeStateResponse, OpenClawAgentsResponse, SessionsResponse, SkillsResponse, ToolsResponse,
-  UsageSummary,
+  UsageLimits, UsageSummary,
 } from "./types";
 
 const TOKEN_KEY = "mc.token";
@@ -98,6 +98,7 @@ export const endpoints = {
   cronRuns: "/api/cron/runs?limit=1000",
   sessions: "/api/activity/sessions?limit=1000",
   usage: "/api/usage/summary?days=30",
+  usageLimits: "/api/usage/limits",
   memory: (p: string): MemoryPath => `/api/memory/${encodeURIComponent(p)}`,
   skills: (p: string): SkillsPath => `/api/skills/${encodeURIComponent(p)}`,
 } as const;
@@ -113,6 +114,7 @@ export interface EndpointTypes {
   "/api/cron/runs?limit=1000": CronRunsResponse;
   "/api/activity/sessions?limit=1000": SessionsResponse;
   "/api/usage/summary?days=30": UsageSummary;
+  "/api/usage/limits": UsageLimits;
 }
 export type MemoryPath = `/api/memory/${string}`;
 export type SkillsPath = `/api/skills/${string}`;

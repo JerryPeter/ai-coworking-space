@@ -9,6 +9,7 @@ wall clock of the machine the dashboard runs on.
 OpenCode keeps no usage log, so only its model/provider is reported; its cost is never invented.
 """
 import json
+import subprocess
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -73,6 +74,42 @@ def opencode_model(path: Path = OPENCODE_MODEL_FILE) -> dict:
     return {**base, "available": True,
             "provider": provider if isinstance(provider, str) else None,
             "model": model if isinstance(model, str) else None}
+
+
+def get_limits() -> dict:
+    """Account-level rate limits (NOT token totals): Claude via `hermes usage --json`
+    (OAuth usage API), OpenCode has no readable limit data so it is reported unavailable."""
+    try:
+        r = subprocess.run(
+            ["hermes", "usage", "--json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        claude_data = json.loads(r.stdout) if r.returncode == 0 else None
+    except Exception:
+        claude_data = None
+
+    claude_windows = []
+    if claude_data and not claude_data.get("unavailable_reason"):
+        for w in claude_data.get("windows", []):
+            claude_windows.append({
+                "label": w["label"],
+                "used_percent": w.get("used_percent"),
+                "remaining_percent": round(100 - (w.get("used_percent") or 0), 1),
+                "resets_at": w.get("resets_at"),
+            })
+
+    return {
+        "claude": {
+            "provider": claude_data.get("provider") if claude_data else "anthropic",
+            "windows": claude_windows,
+            "available": bool(claude_windows),
+            "unavailable_reason": claude_data.get("unavailable_reason") if claude_data else "Failed to fetch",
+        },
+        "opencode": {
+            "available": False,
+            "unavailable_reason": "OpenCode tidak menyimpan data limit yang dapat dibaca",
+        },
+    }
 
 
 def get_usage_summary(days: int = 30) -> dict:

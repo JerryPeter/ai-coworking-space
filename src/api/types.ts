@@ -254,3 +254,25 @@ export interface UsageSummary {
   };
   source: string;
 }
+
+// GET /api/usage/limits (api/sources/usage.py get_limits). Account-level rate-limit windows,
+// NOT token totals — Claude via `hermes usage --json` (OAuth usage API); OpenCode has no
+// readable limit data so it always reports unavailable.
+export interface UsageLimitWindow {
+  label: string;
+  used_percent: number | null;
+  remaining_percent: number;
+  resets_at: string | null;
+}
+export interface UsageLimits {
+  claude: {
+    provider: string;
+    windows: UsageLimitWindow[];
+    available: boolean;
+    unavailable_reason: string | null;
+  };
+  opencode: {
+    available: boolean;
+    unavailable_reason: string | null;
+  };
+}

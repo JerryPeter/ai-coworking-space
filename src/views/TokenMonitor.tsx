@@ -1,10 +1,12 @@
 // Token Monitor (t_4c63386c): Hermes token/cost usage from every profile's state.db + OpenCode status.
 // Data: GET /api/usage/summary?days=30 (api/sources/usage.py) and GET /api/agents/tools (OpenCode state).
 // total tokens = input + output; cache read/write tokens are shown as context, never added in.
-import { Coins, MessageSquare, Zap } from "lucide-react";
+// Limit panel (t_dfd5eafd): GET /api/usage/limits — account-level rate-limit windows (NOT token
+// totals) from `hermes usage --json`. OpenCode has no readable limit data, so it's always a notice.
+import { AlertTriangle, Coins, MessageSquare, Zap } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { endpoints, refetch, useApi } from "../api/client";
-import type { ToolState, UsageBucket } from "../api/types";
+import type { ToolState, UsageBucket, UsageLimitWindow } from "../api/types";
 import { EmptyState, ErrorPanel, Skeleton } from "../components/ui/States";
 import { StatusBadge, type BadgeStatus } from "../components/ui/StatusBadge";
 import { usePageSubtitle } from "../lib/subtitle";
@@ -12,6 +14,8 @@ import { color, identity } from "../theme/agents";
 
 const EXPENSIVE_USD = 10; // a row/day at or above this is highlighted as expensive
 const MOBILE_PX = 780;
+const WARN_PCT = 70; // used% at/above this turns the limit bar yellow
+const DANGER_PCT = 90; // used% at/above this turns the limit bar red
 
 const nf = new Intl.NumberFormat("en-US");
 function fmtTokens(n: number): string {
@@ -42,6 +46,90 @@ function useIsMobile() {
     return () => window.removeEventListener("resize", on);
   }, []);
   return m;
+}
+
+/** "2j 58m lagi" for short waits, "4h 16j lagi" once it crosses a day. */
+function fmtResetIn(iso: string | null, nowMs: number): string {
+  if (!iso) return "—";
+  const ms = new Date(iso).getTime() - nowMs;
+  if (!Number.isFinite(ms)) return "—";
+  if (ms <= 0) return "sebentar lagi";
+  const totalMin = Math.round(ms / 60_000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  if (days > 0) return `${days}h ${hours}j lagi`;
+  if (hours > 0) return `${hours}j ${mins}m lagi`;
+  return `${mins}m lagi`;
+}
+
+function barFillClass(usedPercent: number): string {
+  if (usedPercent >= DANGER_PCT) return "limit-bar-fill limit-bar-danger";
+  if (usedPercent >= WARN_PCT) return "limit-bar-fill limit-bar-warn";
+  return "limit-bar-fill";
+}
+
+function ClaudeLimitWindow({ w, nowMs }: { w: UsageLimitWindow; nowMs: number }) {
+  const used = w.used_percent ?? 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <span style={{ fontWeight: 600 }}>{w.label}</span>
+        <span className="tabular xs muted">{used}% terpakai</span>
+      </div>
+      <div className="limit-bar" role="progressbar" aria-valuenow={used} aria-valuemin={0} aria-valuemax={100} aria-label={w.label}>
+        <div className={barFillClass(used)} style={{ width: `${Math.min(100, Math.max(0, used))}%` }} />
+      </div>
+      <div className="xs muted">
+        Sisa: {w.remaining_percent}% · Reset: {fmtResetIn(w.resets_at, nowMs)}
+      </div>
+    </div>
+  );
+}
+
+function UsageLimitsPanel({ mobile }: { mobile: boolean }) {
+  const limits = useApi(endpoints.usageLimits, 60_000);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const l = limits.data;
+  const claude = l?.claude;
+
+  return (
+    <section className="section" aria-label="Limit Penggunaan">
+      <div className="eyebrow">Limit Penggunaan</div>
+      <div className="dash-cols" style={{ gridTemplateColumns: mobile ? "1fr" : "2fr 1fr" }}>
+        <div className="card">
+          <div className="card-head"><span className="card-title">Claude (Anthropic)</span></div>
+          <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {limits.loading ? (
+              <Skeleton h={80} />
+            ) : !claude?.available ? (
+              <EmptyState title="Data limit tidak tersedia" body={claude?.unavailable_reason ?? limits.error?.message ?? undefined} />
+            ) : (
+              claude.windows.map((w) => <ClaudeLimitWindow key={w.label} w={w} nowMs={nowMs} />)
+            )}
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-head"><span className="card-title">OpenCode</span></div>
+          <div className="card-body">
+            <div className="row" style={{ alignItems: "flex-start", gap: 8 }}>
+              <AlertTriangle size={18} style={{ color: "var(--outcome-running)", flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div style={{ fontWeight: 600 }}>Data limit tidak tersedia</div>
+                <div className="xs muted" style={{ marginTop: 4 }}>
+                  OpenCode tidak menyimpan informasi limit yang dapat dibaca secara programatik.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function TokenTile({ label, b, loading }: { label: string; b?: UsageBucket; loading: boolean }) {
@@ -138,6 +226,8 @@ export default function TokenMonitor() {
 
   return (
     <div className="stack">
+      <UsageLimitsPanel mobile={mobile} />
+
       {/* Bagian 1: Hermes overview */}
       <section className="section" aria-label="Hermes overview">
         <div className="eyebrow">Hermes (Claude) — overview</div>
