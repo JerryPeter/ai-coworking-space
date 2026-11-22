@@ -618,18 +618,6 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     return o;
   }
   function PStool(c?: string) { const o = G(); cy(o, 0.17, 0.13, 0.42, c || "#d64541", 0, 0, 0, 10); return o; }
-  function Stall(canopy: string) {
-    const o = G();
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) bx(o, 0.05, 2.2, 0.05, "#cfd3d6", sx * 1.4, 0, sz * 1.0, false);
-    for (let i = 0; i < 6; i++) bx(o, 0.47, 0.08, 2.2, i % 2 ? "#ffffff" : canopy, -1.4 + 0.47 * i + 0.235, 2.2, 0);
-    bx(o, 2.9, 0.28, 0.02, canopy, 0, 1.93, -1.1, false);
-    bx(o, 2.4, 0.85, 0.6, "#a7774f", 0, 0, -0.55); bx(o, 2.5, 0.04, 0.7, "#e9e2d4", 0, 0.85, -0.55, false);
-    const goods = ["#e74c3c", "#f1c40f", "#27ae60", "#e67e22", "#8e44ad"];
-    for (let i = 0; i < 7; i++) bx(o, 0.2, 0.12 + rnd() * 0.12, 0.2, goods[i % 5], -1.0 + i * 0.33, 0.89, -0.55, false);
-    cy(o, 0.2, 0.2, 0.3, "#b0b5ba", 0.9, 0.89, -0.45, 12, false);
-    bx(o, 2.2, 1.3, 0.35, "#8b6040", 0, 0, 0.85); for (let i = 0; i < 8; i++) cy(o, 0.07, 0.07, 0.2, goods[(i + 2) % 5], -0.9 + i * 0.26, 1.3, 0.8, 8, false);
-    return o;
-  }
   function CoffeeBike() {
     const o = G(); wheel(o, 0.33, 0.06, 0, 0.33, -0.6); wheel(o, 0.33, 0.06, 0, 0.33, 0.55);
     bx(o, 0.05, 0.05, 1.1, "#2f343a", 0, 0.55, 0, false); bx(o, 0.05, 0.5, 0.05, "#2f343a", 0, 0.33, -0.55, false); bx(o, 0.5, 0.04, 0.04, "#2f343a", 0, 0.95, -0.6, false);
@@ -825,7 +813,7 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     const tc = document.createElement("canvas"); tc.width = 1024; tc.height = 420; const tx = tc.getContext("2d")!;
     tx.clearRect(0, 0, 1024, 420); tx.fillStyle = "#ffffff"; tx.textAlign = "center"; tx.textBaseline = "middle";
     tx.font = '600 104px "Plus Jakarta Sans", Arial, sans-serif'; tx.fillText("This Building is", 512, 110); tx.fillText("Solar Powered", 512, 240);
-    tx.font = '500 34px "Plus Jakarta Sans", Arial, sans-serif'; tx.fillText("JRRYPTR", 512, 330);
+    tx.font = '500 34px "Plus Jakarta Sans", Arial, sans-serif'; tx.fillText("OFFICE", 512, 330);
     const tt = new THREE.CanvasTexture(tc);
     const tp = new THREE.Mesh(new THREE.PlaneGeometry(3.9, 1.6), new THREE.MeshBasicMaterial({ map: tt, transparent: true })); tp.position.set(cx, 6.35, z0 + 0.63); f.add(tp);
     // ground floor: white panel, dark beam above the door
@@ -837,9 +825,9 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     for (let i = 0; i < 6; i++) bx(f, cw - 0.3, 0.02, 0.18, "#4a4f55", ccx, cy0 - 0.01, z0 + 0.45 + i * 0.45, false);
     for (let i = 0; i < 5; i++) bx(f, 0.5, 0.015, 0.12, lampMat, ccx - 2.6 + i * 1.3, cy0 - 0.02, z0 + 1.6, false);
     bx(f, cw, 0.12, 0.08, "#1c1e21", ccx, cy0 + 0.38, z0 + cd + 0.06, false);
-    // "JRRYPTR" letters standing on the canopy
+    // "OFFICE" letters standing on the canopy
     const lc = document.createElement("canvas"); lc.width = 2048; lc.height = 320;
-    { const x = lc.getContext("2d")!; x.clearRect(0, 0, 2048, 320); x.fillStyle = "#ffffff"; x.textAlign = "center"; x.textBaseline = "middle"; x.font = '800 300px "Plus Jakarta Sans", Arial, sans-serif'; x.fillText("JRRYPTR", 1024, 170); }
+    { const x = lc.getContext("2d")!; x.clearRect(0, 0, 2048, 320); x.fillStyle = "#ffffff"; x.textAlign = "center"; x.textBaseline = "middle"; x.font = '800 300px "Plus Jakarta Sans", Arial, sans-serif'; x.fillText("OFFICE", 1024, 170); }
     const ltex = new THREE.CanvasTexture(lc);
     const lw2 = 6.2, lh2 = (lw2 * 320) / 2048;
     for (let k2 = 0; k2 < 6; k2++) {
@@ -1310,23 +1298,18 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       for (let x = a + 150; x < b - 60; x += 300) { if (x > -300 && x < 0) continue; put(g, WhitePlanter(), x, 2048, 0, 0.12); }
     }
     // trees + mulch, wooden benches, white street lamps
-    const vend = [[300, 90], [640, 90], [1250, 100], [1880, 90], [2270, 100]];
+    const vend = [[300, 90], [640, 90], [2270, 100]];
     // Keep both gate corridors clear: gate gaps ±60 px margin for the 1.25 m mulch pit.
     const gateLane = [[880, 1220], [1280, 1820]];
     for (let x = -1450; x < 3500; x += 240) { if (vend.some((v) => Math.abs(x - v[0]) < v[1]) || gateLane.some(([a, b]) => x >= a && x <= b)) continue; put(g, MulchPit(), x, 2235, 0, 0); put(g, TreeSlim(0.95 + rnd() * 0.2), x, 2235, rnd() * 360, 0.14); }
     [-1330, -850, 830, 2510, 2680].forEach((x) => put(g, ParkBench(), x, 2210, 0, 0.12));
-    [-1450, -490, 470, 1250, 2150, 3110].forEach((x) => { put(g, StreetLamp("#e8e8e8"), x, 2278, 180, 0.12); const pl = new THREE.PointLight("#ffd98a", 0, 16, 1); pl.position.set(wx(x), 3.8, wz(2278) + 0.95); g.add(pl); streetLights.push(pl); });
+    [-1450, -490, 470, 1180, 2150, 3110].forEach((x) => { put(g, StreetLamp("#e8e8e8"), x, 2278, 180, 0.12); const pl = new THREE.PointLight("#ffd98a", 0, 16, 1); pl.position.set(wx(x), 3.8, wz(2278) + 0.95); g.add(pl); streetLights.push(pl); });
     // street vendors (group, toggled from the visual settings)
     const vG = G(); g.add(vG); vendGroup = vG;
     put(vG, CoffeeBike(), 300, 2185, 90, 0.12); put(vG, Folk({ shirt: "#2a7a5a", pants: "#333", hair: "#1b1b1b" }), 300, 2150, 180, 0.12);
     put(vG, FoodCart(), 640, 2185, 0, 0.12); put(vG, Folk({ shirt: "#f0f0f0", pants: "#3b4f6e", hair: "#2d2420" }), 640, 2222, 0, 0.12);
     put(vG, PStool(), 565, 2175, 0, 0.12); put(vG, PStool("#2e86c1"), 715, 2175, 0, 0.12);
     put(vG, Folk({ shirt: "#9b5cc9", pants: "#2f3540", hair: "#5a3a24", sit: true }), 565, 2175, 90, 0.12);
-    // Stall sits between the two gates (1160-1340 = 3.6 m; stall 2.9 m wide) so both entrances stay clear.
-    put(vG, Stall("#e67e22"), 1250, 2195, 0, 0.12); put(vG, Folk({ shirt: "#c0392b", pants: "#333", hair: "#1b1b1b" }), 1250, 2222, 0, 0.12);
-    put(vG, Folk({ shirt: "#2e86c1", pants: "#2f3540", hair: "#7a4b2a" }), 1250, 2140, 180, 0.12);
-    put(vG, FoodCart(), 1880, 2185, 0, 0.12); put(vG, Folk({ shirt: "#f1c40f", pants: "#2f3540", hair: "#2d2420" }), 1880, 2222, 0, 0.12);
-    roomLabel(vG, "Pedagang kaki lima", 1250, 2185, 2.9);
     put(vG, PecelLele(), -150, 2116, 0, 0.12);
     put(vG, Folk({ shirt: "#ffffff", pants: "#2f3540", hair: "#1b1b1b" }), -88, 2106, -90, 0.12);
     put(vG, Folk({ shirt: "#d14f6a", pants: "#3b4f6e", hair: "#5a3a24", sit: true }), -162, 2085, 180, 0.12);
@@ -1376,7 +1359,10 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       const accentColor = blue ? "#1f4e9c" : "#f07c1b";
       const roofColor = accentColor;
       const frontColor = accentColor;
-      const darkColor = "#1a2a3a";
+      // Light-blue see-through glass (t_3353246e). depthWrite off + renderOrder 2, same as the scene's other glass,
+      // so it blends over the body/front face without sorting artefacts. Door stays a bit darker to read as a door.
+      const glassColor = mat("#9fd0ee", { transparent: true, opacity: 0.55, depthWrite: false }); // cached by mat()
+      const doorColor = "#5f86a3";
       bx(o, W, 2.55, L, bodyColor, 0, 0.4, 0);                                   // main body (0.4..2.95)
       bx(o, W, 0.35, L, roofColor, 0, 2.95, 0);                                  // roof (2.95..3.3)
       bx(o, W + 0.02, 0.6, L + 0.02, accentColor, 0, 0.4, 0, false);             // lower skirt (0.4..1.0)
@@ -1390,11 +1376,11 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       tlL.rotation.y = -Math.PI / 2; tlL.position.set(-W / 2 - 0.03, 1.15, -0.6); o.add(tlL);
       const tlR = new THREE.Mesh(tlL.geometry, tjMat);
       tlR.rotation.y = Math.PI / 2; tlR.position.set(W / 2 + 0.03, 1.15, -0.6); o.add(tlR);
-      for (const sx of [-1, 1]) bx(o, 0.04, 0.9, L - 0.5, darkColor, sx * (W / 2 + 0.01), 1.6, 0.1, false); // window strip
+      for (const sx of [-1, 1]) bx(o, 0.04, 0.9, L - 0.5, glassColor, sx * (W / 2 + 0.01), 1.6, 0.1, false).renderOrder = 2; // window strip
       bx(o, W + 0.02, 2.9, 0.04, frontColor, 0, 0.4, -L / 2 - 0.01, false);      // front face (0.4..3.3)
-      bx(o, W - 0.4, 1.0, 0.04, darkColor, 0, 1.8, -L / 2 - 0.03, false);        // windshield
-      bx(o, W - 0.3, 1.2, 0.04, darkColor, 0, 1.55, L / 2 + 0.01, false);        // rear window
-      bx(o, 0.04, 2.0, 0.9, darkColor, W / 2 + 0.02, 0.75, -3.5, false);         // door (right side, front)
+      bx(o, W - 0.4, 1.0, 0.04, glassColor, 0, 1.8, -L / 2 - 0.03, false).renderOrder = 2; // windshield
+      bx(o, W - 0.3, 1.2, 0.04, glassColor, 0, 1.55, L / 2 + 0.01, false).renderOrder = 2; // rear window
+      bx(o, 0.04, 2.0, 0.9, doorColor, W / 2 + 0.02, 0.75, -3.5, false);          // door (right side, front)
       for (const sx of [-1, 1]) {
         for (const sz of [-3.0, 3.0]) {
           tire(o, wl, 0.5, 0.3, sx * 1.08, sz);

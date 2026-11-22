@@ -12,7 +12,8 @@ export interface AgentIdentity {
   hex: string;           // dark hex (also used by the 3D scene)
   hexLight: string;
   kind: AgentKind;
-  /** Fixed 3D-office desk (0..9). Claude CLI = 4, OpenClaw = 5..8, so new agents need an explicit free desk. */
+  /** Fixed 3D-office desk (0..12). Claude CLI = 4, OpenClaw = 5..8, Bejita = 9, OpenCode = 10, Beerus = 11 (Lantai 1
+   *  Ruang Manager); 12 (Ruang Manager 2) is still free. New agents need an explicit free desk. */
   desk?: number;
 }
 
@@ -29,6 +30,8 @@ export const AGENTS: AgentIdentity[] = [
     cssVar: "--agent-bulma", hex: "#F472B6", hexLight: "#DB2777", kind: "agent", desk: 3 },
   { id: "bejita_video_editor", displayName: "Bejita The Video Editor", shortName: "Bejita", role: "Video Editor",
     cssVar: "--agent-bejita", hex: "#3B82F6", hexLight: "#1D4ED8", kind: "agent", desk: 9 },
+  { id: "beerus_digital_lead", displayName: "Beerus The Digital Lead", shortName: "Beerus", role: "Digital & Creative Lead",
+    cssVar: "--agent-beerus", hex: "#FACC15", hexLight: "#A16207", kind: "agent", desk: 11 },
 ];
 
 export const CLAUDE: AgentIdentity = {
@@ -83,6 +86,12 @@ export const PIXEL_MAPS: Record<string, PixelMap> = {
     // spiky upswept black hair with a sharp widow's peak, stern brows
     rows: ["H.H.H.HH", "HHHHHHHH", "HHHSSHHH", "HSSSSSSH", "SBBSSBBS", "SSESSESS", "SSSMMSSS", "SSSSSSSS"],
     palette: { S: SKIN, E: EYE, M: MOUTH, H: "#14141F", B: "#14141F" },
+  },
+  beerus_digital_lead: {
+    // Beerus the cat god: bald grey-purple head (no standard SKIN), tall pointed ears with darker inner ear,
+    // sharp slanted brows over narrow eyes, gold earrings at the jaw.
+    rows: ["P......P", "PI....IP", "PPPPPPPP", "PBBPPBBP", "PPEPPEPP", "PPPPPPPP", "GPPMMPPG", "GPPPPPPG"],
+    palette: { P: "#9B7FB8", I: "#6B4F88", B: "#2E1B3F", E: "#FACC15", M: "#5B3A6E", G: "#EAB308" },
   },
   [CLAUDE_ID]: {
     rows: ["...A....", "...A....", "DDDDDDDD", "DFFFFFFD", "DFOFFOFD", "DFFFFFFD", "DFFOOFFD", "DDDDDDDD"],
