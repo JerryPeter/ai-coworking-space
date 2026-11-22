@@ -31,7 +31,7 @@ export const AGENTS: AgentIdentity[] = [
   { id: "bejita_video_editor", displayName: "Bejita The Video Editor", shortName: "Bejita", role: "Video Editor",
     cssVar: "--agent-bejita", hex: "#3B82F6", hexLight: "#1D4ED8", kind: "agent", desk: 9 },
   { id: "beerus_digital_lead", displayName: "Beerus The Digital Lead", shortName: "Beerus", role: "Digital & Creative Lead",
-    cssVar: "--agent-beerus", hex: "#FACC15", hexLight: "#A16207", kind: "agent", desk: 11 },
+    cssVar: "--agent-beerus", hex: "#A855F7", hexLight: "#7E22CE", kind: "agent", desk: 11 },
 ];
 
 export const CLAUDE: AgentIdentity = {
