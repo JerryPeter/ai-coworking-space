@@ -228,6 +228,30 @@ const ROSTER_TAB_KEY = "mc.office.rosterTab";
 function readRosterTab(): RosterTab {
   try { return localStorage.getItem(ROSTER_TAB_KEY) === "rooms" ? "rooms" : "agents"; } catch { return "agents"; }
 }
+/** "Agen" tab filters. Platform + status persist in localStorage; the name query does not. */
+type PlatformFilter = "all" | "hermes" | "openclaw";
+type StatusFilter = "all" | "active" | "working" | "idle";
+type PlatformGroup = "hermes" | "openclaw" | "tools";
+const ROSTER_FILTER_KEY = "mc.office.rosterFilter";
+const PLATFORM_FILTERS: [PlatformFilter, string][] = [["all", "Semua"], ["hermes", "Hermes"], ["openclaw", "OpenClaw"]];
+const STATUS_FILTERS: [StatusFilter, string][] = [["all", "Semua"], ["active", "Aktif"], ["working", "Working"], ["idle", "Idle"]];
+const GROUPS: [PlatformGroup, string][] = [["hermes", "Hermes"], ["openclaw", "OpenClaw"], ["tools", "Tools"]];
+function readRosterFilter(): { platform: PlatformFilter; status: StatusFilter } {
+  const out = { platform: "all" as PlatformFilter, status: "all" as StatusFilter };
+  try {
+    const v = JSON.parse(localStorage.getItem(ROSTER_FILTER_KEY) || "{}");
+    if (PLATFORM_FILTERS.some(([k]) => k === v.platform)) out.platform = v.platform;
+    if (STATUS_FILTERS.some(([k]) => k === v.status)) out.status = v.status;
+  } catch { /* storage unavailable / bad JSON */ }
+  return out;
+}
+/** Aktif = not offline/error; Working = working|meeting; Idle = idle|break|waiting. */
+function statusMatches(f: StatusFilter, s: AgentStatus): boolean {
+  if (f === "active") return s !== "offline" && s !== "error";
+  if (f === "working") return s === "working" || s === "meeting";
+  if (f === "idle") return s === "idle" || s === "break" || s === "waiting";
+  return true;
+}
 /** Room navigation shortcuts: label centres from townhall.ts roomLabel() (floor-plan px). Toilet/Gudang/Tangga left out. */
 interface RoomNav { name: string; icon: string; floor: 1 | 2; px: number; pz: number }
 const ROOMS: RoomNav[] = [
@@ -344,6 +368,11 @@ export class OfficeScene3D {
   // DOM: tab bar (Agen / Ruangan) inside the roster; room shortcut buttons indexed like ROOMS.
   private tabs!: Record<RosterTab, { btn: HTMLButtonElement; pane: HTMLElement }>;
   private rosterTab = readRosterTab();
+  private rosterFilter = readRosterFilter();
+  private rosterQuery = "";
+  private filterBtns: { platform: Map<PlatformFilter, HTMLButtonElement>; status: Map<StatusFilter, HTMLButtonElement> } = { platform: new Map(), status: new Map() };
+  private searchInput: HTMLInputElement | null = null;
+  private searchClear: HTMLButtonElement | null = null;
   private roomEntries: HTMLButtonElement[] = [];
   private activeRoom = -1;
 
@@ -1166,7 +1195,7 @@ export class OfficeScene3D {
       this.setRosterTab(k);
       this.tabs[k].btn.focus();
     });
-    this.tabs.agents.pane.append(list, detail);
+    this.tabs.agents.pane.append(this.buildRosterFilters(root.id), list, detail);
     this.tabs.rooms.pane.appendChild(this.buildRoomList(root.id));
     root.append(header, tablist, this.tabs.agents.pane, this.tabs.rooms.pane);
     this.applyRosterTab();
@@ -1203,9 +1232,81 @@ export class OfficeScene3D {
     if (url === undefined) { url = orb ? drawClaudeMascotFace(orb) : drawFace(skin, hair, a.data.color); this.faces.set(key, url); }
     return url;
   }
+  /** Platform group of an agent: Claude Code CLI (orb) + OpenCode engine (terminal) are "tools". */
+  private groupOf(a: Agent3D): PlatformGroup {
+    if (a.terminal || a.orb || a.data.id === CLAUDE_AGENT_ID || a.data.id === OPENCODE_AGENT_ID) return "tools";
+    return a.data.id.startsWith("openclaw:") ? "openclaw" : "hermes";
+  }
+  private isFiltered() {
+    const f = this.rosterFilter;
+    return f.platform !== "all" || f.status !== "all" || this.rosterQuery.trim() !== "";
+  }
+  /** AND of platform, status and name/id substring (case-insensitive). */
+  private matchesFilter(a: Agent3D) {
+    const f = this.rosterFilter;
+    if (f.platform !== "all" && this.groupOf(a) !== f.platform) return false;
+    if (!statusMatches(f.status, a.data.status)) return false;
+    const q = this.rosterQuery.trim().toLowerCase();
+    return !q || a.data.name.toLowerCase().includes(q) || a.data.id.toLowerCase().includes(q);
+  }
+  /** Filter controls of the "Agen" tab. Built once: re-renders only rebuild the <ul>, so the search keeps focus/value. */
+  private buildRosterFilters(idBase: string) {
+    const box = el("div", "o3d-filters");
+    const search = el("div", "o3d-search");
+    const input = el("input");
+    input.type = "search"; input.placeholder = "Cari nama agent…"; input.id = idBase + "-q";
+    input.setAttribute("aria-label", "Cari agent berdasarkan nama"); input.autocomplete = "off"; input.spellcheck = false;
+    const clear = el("button", "o3d-search-clear", "✕");
+    clear.type = "button"; clear.title = "Kosongkan pencarian"; clear.setAttribute("aria-label", clear.title); clear.hidden = true;
+    input.addEventListener("input", () => { this.rosterQuery = input.value; clear.hidden = !input.value; this.renderRoster(); });
+    input.addEventListener("keydown", (e) => { if (e.key === "Escape" && input.value) { e.preventDefault(); e.stopPropagation(); this.setRosterQuery(""); } });
+    clear.addEventListener("click", () => { this.setRosterQuery(""); input.focus(); });
+    search.append(input, clear);
+    this.searchInput = input; this.searchClear = clear;
+    const mkSeg = <K extends string>(label: string, opts: [K, string][], map: Map<K, HTMLButtonElement>, pick: (k: K) => void) => {
+      const seg = el("div", "segmented o3d-seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", label);
+      opts.forEach(([k, text]) => {
+        const b = el("button", "", text); b.type = "button";
+        b.addEventListener("click", () => pick(k));
+        map.set(k, b); seg.appendChild(b);
+      });
+      return seg;
+    };
+    box.append(
+      search,
+      mkSeg("Filter platform", PLATFORM_FILTERS, this.filterBtns.platform, (k) => this.setRosterFilter({ platform: k })),
+      mkSeg("Filter status", STATUS_FILTERS, this.filterBtns.status, (k) => this.setRosterFilter({ status: k })),
+    );
+    this.applyFilterButtons();
+    return box;
+  }
+  private applyFilterButtons() {
+    this.filterBtns.platform.forEach((b, k) => b.setAttribute("aria-pressed", String(k === this.rosterFilter.platform)));
+    this.filterBtns.status.forEach((b, k) => b.setAttribute("aria-pressed", String(k === this.rosterFilter.status)));
+  }
+  private setRosterFilter(patch: Partial<{ platform: PlatformFilter; status: StatusFilter }>) {
+    this.rosterFilter = { ...this.rosterFilter, ...patch };
+    try { localStorage.setItem(ROSTER_FILTER_KEY, JSON.stringify(this.rosterFilter)); } catch { /* storage unavailable */ }
+    this.applyFilterButtons();
+    this.renderRoster();
+  }
+  private setRosterQuery(q: string) {
+    this.rosterQuery = q;
+    if (this.searchInput) this.searchInput.value = q;
+    if (this.searchClear) this.searchClear.hidden = !q;
+    this.renderRoster();
+  }
+  private resetRosterFilters() {
+    this.rosterQuery = "";
+    if (this.searchInput) this.searchInput.value = "";
+    if (this.searchClear) this.searchClear.hidden = true;
+    this.setRosterFilter({ platform: "all", status: "all" });
+  }
   private renderRoster() {
     const { title, tally, list } = this.ui;
-    title.textContent = this.agents.length + " agent";
+    // Title: "N agent", or "X dari N agent" while filtered. The tally below always counts every agent.
+    const shown = this.agents.filter((a) => this.matchesFilter(a));
+    title.textContent = this.isFiltered() ? shown.length + " dari " + this.agents.length + " agent" : this.agents.length + " agent";
     tally.textContent = "";
     const counts: Partial<Record<AgentStatus, number>> = {};
     this.agents.forEach((a) => { counts[a.data.status] = (counts[a.data.status] || 0) + 1; });
@@ -1216,28 +1317,39 @@ export class OfficeScene3D {
     });
     const keepY = list.scrollTop, keepX = list.scrollLeft;
     list.textContent = "";
-    // Desk order = team order (Hermes 0-3, Claude CLI 4, OpenClaw 5-8), independent of fetch order.
-    [...this.agents].sort((x, y) => x.deskIdx - y.deskIdx).forEach((a) => {
-      const li = el("li"), b = el("button"); b.type = "button";
-      if (a === this.selected) b.setAttribute("aria-current", "true");
-      const av = el("span", "o3d-avatar"), face = el("img"); face.src = this.faceIcon(a); face.alt = ""; face.draggable = false;
-      av.style.background = a.orb ? "#1c1f26" : a.data.color; av.appendChild(face);
-      if (a.orb) b.classList.add("o3d-mascot", "o3d-mascot-" + a.orb.state);
-      if (a.data.status === "offline") b.classList.add("o3d-off");
-      const st = el("i"); st.style.background = STATUS[a.data.status].color; av.appendChild(st);
-      const oc = a.data.id.startsWith("openclaw:");
-      const engine = !!a.terminal;
-      const fw = el("span", "o3d-fw " + (engine ? "badge-opencode" : oc ? "badge-openclaw" : "badge-hermes"), engine ? "OPC" : oc ? "OC" : "H");
-      fw.title = engine ? "OpenCode engine" : oc ? "OpenClaw agent" : "Hermes agent";
-      const nm = el("span", "o3d-name"); nm.append(fw, el("span", "truncate", capLabel(a.data.name)));
-      const who = el("span", "o3d-who"); who.appendChild(nm);
-      const sm = el("small", "", STATUS[a.data.status].label); sm.style.color = STATUS[a.data.status].color; who.appendChild(sm);
-      b.append(av, who, el("span", "o3d-where", this.locText(a)));
-      b.addEventListener("click", () => { this.select(a.data.id); this.opts.onSelect?.(a.data.id); });
-      li.appendChild(b); list.appendChild(li);
+    if (!shown.length) {
+      const li = el("li", "o3d-empty"), reset = el("button", "o3d-reset", "Reset filter");
+      reset.type = "button"; reset.addEventListener("click", () => this.resetRosterFilters());
+      li.append(el("p", "", "Tidak ada agent yang cocok"), reset); list.appendChild(li);
+    }
+    // Platform groups Hermes → OpenClaw → Tools; desk order inside each group, independent of fetch order.
+    GROUPS.forEach(([g, label]) => {
+      const members = shown.filter((a) => this.groupOf(a) === g).sort((x, y) => x.deskIdx - y.deskIdx);
+      if (!members.length) return;
+      const head = el("li", "o3d-group", label); head.setAttribute("role", "presentation"); list.appendChild(head);
+      members.forEach((a) => this.renderRosterItem(a, list));
     });
     list.scrollTop = keepY; list.scrollLeft = keepX;
     this.renderDetail();
+  }
+  private renderRosterItem(a: Agent3D, list: HTMLUListElement) {
+    const li = el("li"), b = el("button"); b.type = "button";
+    if (a === this.selected) b.setAttribute("aria-current", "true");
+    const av = el("span", "o3d-avatar"), face = el("img"); face.src = this.faceIcon(a); face.alt = ""; face.draggable = false;
+    av.style.background = a.orb ? "#1c1f26" : a.data.color; av.appendChild(face);
+    if (a.orb) b.classList.add("o3d-mascot", "o3d-mascot-" + a.orb.state);
+    if (a.data.status === "offline") b.classList.add("o3d-off");
+    const st = el("i"); st.style.background = STATUS[a.data.status].color; av.appendChild(st);
+    const oc = a.data.id.startsWith("openclaw:");
+    const engine = !!a.terminal;
+    const fw = el("span", "o3d-fw " + (engine ? "badge-opencode" : oc ? "badge-openclaw" : "badge-hermes"), engine ? "OPC" : oc ? "OC" : "H");
+    fw.title = engine ? "OpenCode engine" : oc ? "OpenClaw agent" : "Hermes agent";
+    const nm = el("span", "o3d-name"); nm.append(fw, el("span", "truncate", capLabel(a.data.name)));
+    const who = el("span", "o3d-who"); who.appendChild(nm);
+    const sm = el("small", "", STATUS[a.data.status].label); sm.style.color = STATUS[a.data.status].color; who.appendChild(sm);
+    b.append(av, who, el("span", "o3d-where", this.locText(a)));
+    b.addEventListener("click", () => { this.select(a.data.id); this.opts.onSelect?.(a.data.id); });
+    li.appendChild(b); list.appendChild(li);
   }
   private renderDetail() {
     const { detail, dl, dName } = this.ui, a = this.selected;
