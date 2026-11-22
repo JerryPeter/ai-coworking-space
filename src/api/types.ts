@@ -271,8 +271,4 @@ export interface UsageLimits {
     available: boolean;
     unavailable_reason: string | null;
   };
-  opencode: {
-    available: boolean;
-    unavailable_reason: string | null;
-  };
 }

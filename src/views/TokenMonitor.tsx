@@ -2,8 +2,8 @@
 // Data: GET /api/usage/summary?days=30 (api/sources/usage.py) and GET /api/agents/tools (OpenCode state).
 // total tokens = input + output; cache read/write tokens are shown as context, never added in.
 // Limit panel (t_dfd5eafd): GET /api/usage/limits — account-level rate-limit windows (NOT token
-// totals) from `hermes usage --json`. OpenCode has no readable limit data, so it's always a notice.
-import { AlertTriangle, Coins, MessageSquare, Zap } from "lucide-react";
+// totals) from `hermes usage --json`. (t_25361e25: OpenCode limit card removed — no readable data.)
+import { Coins, MessageSquare, Zap } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { endpoints, refetch, useApi } from "../api/client";
 import type { ToolState, UsageBucket, UsageLimitWindow } from "../api/types";
@@ -87,7 +87,7 @@ function ClaudeLimitWindow({ w, nowMs }: { w: UsageLimitWindow; nowMs: number })
   );
 }
 
-function UsageLimitsPanel({ mobile }: { mobile: boolean }) {
+function UsageLimitsPanel() {
   const limits = useApi(endpoints.usageLimits, 60_000);
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -100,7 +100,7 @@ function UsageLimitsPanel({ mobile }: { mobile: boolean }) {
   return (
     <section className="section" aria-label="Limit Penggunaan">
       <div className="eyebrow">Limit Penggunaan</div>
-      <div className="dash-cols" style={{ gridTemplateColumns: mobile ? "1fr" : "2fr 1fr" }}>
+      <div className="dash-cols" style={{ gridTemplateColumns: "1fr" }}>
         <div className="card">
           <div className="card-head"><span className="card-title">Claude (Anthropic)</span></div>
           <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -111,20 +111,6 @@ function UsageLimitsPanel({ mobile }: { mobile: boolean }) {
             ) : (
               claude.windows.map((w) => <ClaudeLimitWindow key={w.label} w={w} nowMs={nowMs} />)
             )}
-          </div>
-        </div>
-        <div className="card">
-          <div className="card-head"><span className="card-title">OpenCode</span></div>
-          <div className="card-body">
-            <div className="row" style={{ alignItems: "flex-start", gap: 8 }}>
-              <AlertTriangle size={18} style={{ color: "var(--outcome-running)", flexShrink: 0, marginTop: 2 }} />
-              <div>
-                <div style={{ fontWeight: 600 }}>Data limit tidak tersedia</div>
-                <div className="xs muted" style={{ marginTop: 4 }}>
-                  OpenCode tidak menyimpan informasi limit yang dapat dibaca secara programatik.
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -226,7 +212,7 @@ export default function TokenMonitor() {
 
   return (
     <div className="stack">
-      <UsageLimitsPanel mobile={mobile} />
+      <UsageLimitsPanel />
 
       {/* Bagian 1: Hermes overview */}
       <section className="section" aria-label="Hermes overview">
