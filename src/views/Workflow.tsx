@@ -20,8 +20,10 @@ const FLOWS: Flow[] = [
   } },
   { title: "Request Video", root: {
     id: null, name: "User", desc: "Mengajukan request video", children: [{
-      id: "default", name: "Hawa (COO)", desc: "Koordinasi", children: [{
-        id: "bejita_video_editor", name: "Bejita (Video Editor)", desc: "Editing & arahan video", children: [claude("Render & produksi")],
+      id: "default", name: "Hawa (COO)", desc: "Koordinasi & keputusan", children: [{
+        id: "beerus_digital_lead", name: "Beerus (Digital & Creative Lead)", desc: "Konsep konten, riset, brief kreatif", children: [{
+          id: "bejita_video_editor", name: "Bejita (Video Editor)", desc: "Produksi video, editing, render", children: [claude("Render & build")],
+        }],
       }],
     }],
   } },
