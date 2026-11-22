@@ -1,38 +1,43 @@
 // Workflow view (t_b9f7d656, t_5115c601): animated node diagram of how requests flow through the AI agent team.
+// Design spec: Bulma (t_5115c601) — pill nodes w/ step number, SVG arrow overlay w/ agent-color gradients,
+// continuous CSS-only dash animation (no JS timers — animation must never be "triggered by state").
 // Colors always come from theme/agents.ts -> --agent-* CSS variables (never hardcoded hex).
-import { useEffect, useId, useState } from "react";
+import { Fragment, useId, useState } from "react";
 import type { CSSProperties } from "react";
-import { identity } from "../theme/agents";
+import { Check } from "lucide-react";
+import { identity, color, subtle } from "../theme/agents";
 
 /** A flow node: `id` is an agent profile id (null = the requesting user, neutral color). */
-interface FlowNode { id: string | null; name: string; desc: string }
-/** A flow is a sequence of stages; every node of a stage links to every node of the next stage. */
+interface FlowNode { id: string | null; desc: string }
+/** A flow is a sequence of stages; every node of a stage links to every node of the next stage
+ *  (this models both branches, e.g. Goku -> {Kuririn, Bulma}, and merges, e.g. {Kuririn, Bulma} -> Claude). */
 interface Flow { key: string; label: string; title: string; stages: FlowNode[][] }
 
-const USER = (desc: string): FlowNode => ({ id: null, name: "User", desc });
-const claude = (desc: string): FlowNode => ({ id: "claude_cli", name: "Claude Code CLI", desc });
+const user = (desc: string): FlowNode => ({ id: null, desc });
+const node = (id: string, desc: string): FlowNode => ({ id, desc });
+const claude = (desc: string): FlowNode => node("claude_cli", desc);
 
 const FLOWS: Flow[] = [
   { key: "teknis", label: "Teknis", title: "Request Teknis / Aplikasi", stages: [
-    [USER("Request teknis / aplikasi")],
-    [{ id: "default", name: "Hawa The Second (COO)", desc: "Koordinasi & keputusan produk" }],
-    [{ id: "goku_cto", name: "Goku The CTO", desc: "Perencanaan teknis & brief" }],
+    [user("Mengajukan request teknis atau aplikasi")],
+    [node("default", "Koordinasi & keputusan produk")],
+    [node("goku_cto", "Perencanaan teknis & brief")],
     [
-      { id: "kuririn_dev_lead", name: "Kuririn The Dev", desc: "Implementasi kode" },
-      { id: "bulma_uiux", name: "Bulma UI/UX", desc: "Desain & review visual" },
+      node("kuririn_dev_lead", "Implementasi kode"),
+      node("bulma_uiux", "Desain & review visual"),
     ],
     [claude("Eksekusi kode, build, test")],
   ] },
   { key: "video", label: "Video", title: "Request Video", stages: [
-    [USER("Request video")],
-    [{ id: "default", name: "Hawa (COO)", desc: "Koordinasi & keputusan" }],
-    [{ id: "beerus_digital_lead", name: "Beerus", desc: "Konsep konten, riset, brief kreatif" }],
-    [{ id: "bejita_video_editor", name: "Bejita", desc: "Produksi video, editing, render" }],
+    [user("Mengajukan request video")],
+    [node("default", "Koordinasi & keputusan")],
+    [node("beerus_digital_lead", "Konsep konten, riset, brief kreatif")],
+    [node("bejita_video_editor", "Produksi video, editing, render")],
     [claude("Render & build")],
   ] },
   { key: "riset", label: "Riset", title: "Riset / Data", stages: [
-    [USER("Riset atau permintaan data")],
-    [{ id: "default", name: "Hawa (COO)", desc: "Ditangani langsung atau melalui Goku" }],
+    [user("Mengajukan riset atau permintaan data")],
+    [node("default", "Ditangani langsung atau melalui Goku")],
   ] },
 ];
 
@@ -45,67 +50,78 @@ const DELEGATION: [string, string][] = [
   ["Build, test & eksekusi kode", "Claude Code CLI"],
 ];
 
-const nodeColor = (id: string | null) => (id ? `var(${identity(id).cssVar})` : "var(--text-muted)");
-const isTool = (id: string | null) => id !== null && identity(id).kind === "tool";
-const nodeIcon = (id: string | null) => (id === null ? "👤" : isTool(id) ? ">_" : identity(id).shortName.charAt(0));
-/** Center of slot `i` out of `n` equal slots, as a percentage string. */
+/** Center of slot `i` out of `n` equal slots, as a percentage string (for arrow endpoints). */
 const slot = (i: number, n: number) => `${((2 * i + 1) / (2 * n)) * 100}%`;
+const nodeColor = (id: string | null) => (id === null ? "var(--text-muted)" : color(id));
+const nodeSubtle = (id: string | null) => (id === null ? "transparent" : subtle(id));
+const nodeName = (id: string | null) => (id === null ? "User" : identity(id).shortName);
 
-function Node({ n, active }: { n: FlowNode; active: boolean }) {
-  const cls = `wf-node${isTool(n.id) ? " wf-node-tool" : ""}${active ? " wf-node-active" : ""}`;
+/** Node state (spec: aktif / selesai / pending). This diagram has no live execution-status feed yet,
+ *  so every real agent/tool renders "aktif" (the team is always available) and the user is neutral.
+ *  `--done`/`--pending` styling is implemented and ready to wire up once real step-status data exists. */
+type NodeState = "user" | "active" | "done" | "pending";
+const nodeState = (id: string | null): NodeState => (id === null ? "user" : "active");
+
+function Node({ n, step }: { n: FlowNode; step: number }) {
+  const state = nodeState(n.id);
+  const style = { "--wf-c": nodeColor(n.id), "--wf-c-subtle": nodeSubtle(n.id) } as CSSProperties;
   return (
-    <div className={cls} style={{ "--wf-c": nodeColor(n.id) } as CSSProperties}>
-      <span className="wf-icon" aria-hidden="true">{nodeIcon(n.id)}</span>
-      <span className="wf-text">
-        <span className="wf-name">{n.name}</span>
-        <span className="wf-desc">{n.desc}</span>
-      </span>
+    <div className={`wf-node wf-node--${state}`} style={style} title={n.desc}>
+      <span className="wf-node-step">{String(step).padStart(2, "0")}</span>
+      <span className="wf-node-name">{nodeName(n.id)}</span>
+      {state === "done" && <Check className="wf-node-check" size={12} aria-hidden="true" />}
     </div>
   );
 }
 
-/** Animated arrows from every node of `from` to every node of `to`. Two SVGs: horizontal (desktop) and
- *  vertical (mobile); CSS shows the one matching the layout. Percent coordinates keep dashes unscaled. */
+/** SVG arrow overlay between two adjacent stages: one line per (from-node, to-node) pair, gradient
+ *  from the source agent's color to the target's. A link only "flows" (dashed + animated) when both
+ *  ends are real agents — the initial User -> Hawa hop is drawn idle/solid, matching the idle arrow spec. */
 function Connector({ from, to }: { from: FlowNode[]; to: FlowNode[] }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
-  const links = from.flatMap((_, a) => to.map((t, b) => ({ a, b, c: nodeColor(t.id) })));
-  const svg = (dir: "h" | "v") => (
-    <svg className={`wf-link wf-link-${dir}`} aria-hidden="true">
+  const links = from.flatMap((f, a) => to.map((t, b) => ({ a, b, src: f.id, tgt: t.id })));
+  return (
+    <svg className="wf-link" aria-hidden="true" preserveAspectRatio="none">
       <defs>
         {links.map((l, i) => (
-          <marker key={i} id={`${uid}${dir}${i}`} viewBox="0 0 10 10" refX="9" refY="5"
-            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0,0 L10,5 L0,10 z" style={{ fill: l.c }} />
-          </marker>
+          <Fragment key={i}>
+            <linearGradient id={`${uid}g${i}`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" style={{ stopColor: nodeColor(l.src) }} />
+              <stop offset="100%" style={{ stopColor: nodeColor(l.tgt) }} />
+            </linearGradient>
+            <marker id={`${uid}m${i}`} viewBox="0 0 8 8" refX="7" refY="4"
+              markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M0,0 L8,4 L0,8 Z" style={{ fill: nodeColor(l.tgt) }} />
+            </marker>
+          </Fragment>
         ))}
       </defs>
       {links.map((l, i) => {
-        const ends = dir === "h"
-          ? { x1: "0", y1: slot(l.a, from.length), x2: "100%", y2: slot(l.b, to.length) }
-          : { x1: slot(l.a, from.length), y1: "0", x2: slot(l.b, to.length), y2: "100%" };
-        return <line key={i} className="wf-flow-line" {...ends} style={{ stroke: l.c }} markerEnd={`url(#${uid}${dir}${i})`} />;
+        const active = l.src !== null && l.tgt !== null;
+        return (
+          <line key={i}
+            x1="0" y1={slot(l.a, from.length)} x2="100%" y2={slot(l.b, to.length)}
+            className={`wf-flow-line${active ? " wf-flow-line--active" : ""}`}
+            style={{ stroke: active ? `url(#${uid}g${i})` : "var(--border-strong)" }}
+            markerEnd={`url(#${uid}m${i})`}
+          />
+        );
       })}
     </svg>
   );
-  return <div className="wf-connector">{svg("h")}{svg("v")}</div>;
 }
 
 function Diagram({ flow }: { flow: Flow }) {
-  const [active, setActive] = useState(0);
-  useEffect(() => {
-    setActive(0);
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    const t = window.setInterval(() => setActive((s) => (s + 1) % flow.stages.length), 2000);
-    return () => window.clearInterval(t);
-  }, [flow]);
+  let step = 0;
   return (
-    <div className="wf-diagram-wrap">
+    <div className="wf-canvas">
+      <div className="wf-canvas-grid" aria-hidden="true" />
       <div className="wf-diagram">
         {flow.stages.map((stage, i) => (
           <div key={i} className="wf-stage-group">
             {i > 0 && <Connector from={flow.stages[i - 1]} to={stage} />}
             <div className="wf-stage">
-              {stage.map((n, j) => <Node key={j} n={n} active={i === active} />)}
+              {stage.map((n, j) => { step += 1; return <Node key={j} n={n} step={step} />; })}
             </div>
           </div>
         ))}

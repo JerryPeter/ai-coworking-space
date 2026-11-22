@@ -681,52 +681,58 @@ table.simple td { padding: 8px; border-bottom: 1px solid var(--border-subtle); }
 .agents-filters .team-filter-bar { margin-bottom: var(--space-2); }
 .filter-count { font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
-/* Workflow (t_b9f7d656, t_5115c601): animated node diagram. Each node sets --wf-c to its agent color var. */
+/* Workflow (t_b9f7d656, t_5115c601): animated node diagram, design spec by Bulma.
+   Each node sets --wf-c / --wf-c-subtle to its agent color vars; arrows are an SVG overlay per stage gap. */
 .wf-title { margin: 0; font-size: var(--text-2xl); line-height: var(--lh-2xl); font-weight: 700; }
 .wf-card { padding: var(--space-4); }
 .wf-flow-title { margin: 0 0 var(--space-4); font-size: var(--text-lg); line-height: var(--lh-lg); font-weight: 600; }
 .wf-tabs-row { display: flex; margin-bottom: var(--space-3); }
-.wf-diagram-wrap { container-type: inline-size; overflow-x: auto; padding: var(--space-2) 4px; }
-.wf-diagram { display: flex; align-items: stretch; width: max-content; min-width: 100%; justify-content: center; }
+
+/* Canvas: full width, min-height 320px, inset bg + a barely-visible dot grid. */
+.wf-canvas {
+  position: relative; width: 100%; min-height: 320px; display: flex; align-items: center;
+  background: var(--bg-inset); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  overflow-x: auto; overflow-y: hidden;
+}
+.wf-canvas-grid {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0.03;
+  background-image: radial-gradient(circle, var(--text-primary) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+.wf-diagram { position: relative; z-index: 1; display: flex; align-items: stretch; width: max-content; min-width: 100%; justify-content: center; margin: auto; padding: var(--space-8) var(--space-6); }
 .wf-stage-group { display: flex; align-items: stretch; }
-.wf-stage { display: grid; grid-auto-rows: 1fr; align-items: center; justify-items: center; width: 160px; }
+.wf-stage { flex: none; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: var(--space-3); }
+
+/* Node: pill, 160x56 desktop / 140x48 mobile. */
 .wf-node {
-  --wf-c: var(--text-muted);
-  display: flex; align-items: center; gap: 8px; width: 100%; margin: 6px 0; padding: 6px 12px 6px 6px;
-  border-radius: var(--radius-pill); border: 1.5px solid var(--wf-c);
-  background: color-mix(in srgb, var(--wf-c) 15%, transparent);
-  transition: transform var(--dur-fast);
+  --wf-c: var(--text-muted); --wf-c-subtle: transparent;
+  flex: none; display: flex; align-items: center; gap: var(--space-2); width: 160px; height: 56px;
+  padding: 0 var(--space-3); border-radius: var(--radius-pill);
+  background: var(--bg-surface-elevated); border: 1px solid var(--border-default);
 }
-.wf-icon {
-  flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
-  background: var(--wf-c); color: var(--bg-surface); font-size: var(--text-sm); font-weight: 700; line-height: 1;
-}
-.wf-node-tool { border-radius: var(--radius-md); border-style: dashed; }
-.wf-node-tool .wf-icon { border-radius: var(--radius-sm); font-family: var(--font-mono, monospace); font-size: 12px; }
-.wf-text { display: flex; flex-direction: column; min-width: 0; }
-.wf-name { font-size: var(--text-sm); font-weight: 600; line-height: 18px; color: var(--text-primary); }
-.wf-desc { font-size: var(--text-xs); line-height: 15px; color: var(--text-secondary); }
-.wf-node-active { animation: wf-node-glow 2s ease-in-out infinite; }
-@keyframes wf-node-glow {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--wf-c) 0%, transparent); }
-  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--wf-c) 22%, transparent), 0 0 16px color-mix(in srgb, var(--wf-c) 60%, transparent); }
-}
-.wf-connector { flex: none; display: flex; width: 44px; }
-.wf-link { display: block; width: 100%; height: 100%; overflow: visible; }
-.wf-link-v { display: none; }
-.wf-flow-line { stroke-width: 2; stroke-dasharray: 6 6; stroke-linecap: round; fill: none; animation: wf-flow-dash 2s linear infinite; }
-@keyframes wf-flow-dash { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -24; } }
-@container (max-width: 640px) {
-  .wf-diagram, .wf-stage-group { flex-direction: column; width: 100%; }
-  .wf-stage { width: 100%; grid-auto-rows: auto; grid-auto-flow: column; grid-auto-columns: 1fr; }
-  .wf-node { width: min(100% - 8px, 260px); margin: 0 4px; }
-  .wf-connector { width: 100%; height: 36px; }
-  .wf-link-h { display: none; }
-  .wf-link-v { display: block; }
+.wf-node-step { flex: none; font-family: var(--font-mono); font-size: var(--text-micro); color: var(--text-muted); }
+.wf-node-name { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wf-node-check { flex: none; margin-left: auto; color: var(--wf-c); }
+
+/* Node states (spec: aktif / selesai / pending). */
+.wf-node--active { border-color: var(--wf-c); box-shadow: 0 0 0 3px var(--wf-c-subtle); }
+.wf-node--done { opacity: 0.7; }
+.wf-node--pending, .wf-node--user { border-color: var(--border-subtle); }
+.wf-node--pending .wf-node-name, .wf-node--user .wf-node-name { color: var(--text-muted); }
+
+/* Arrows: idle = solid --border-strong; active = gradient + flowing dashes, looping forever (never JS-triggered). */
+.wf-link { flex: none; width: 56px; display: block; overflow: visible; }
+.wf-flow-line { stroke-width: 2; fill: none; stroke: var(--border-strong); }
+.wf-flow-line--active { stroke-dasharray: 6 4; animation: wf-flow 1.2s linear infinite; }
+@keyframes wf-flow { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+
+@media (max-width: 640px) {
+  .wf-node { width: 140px; height: 48px; }
+  .wf-link { width: 36px; }
+  .wf-diagram { padding: var(--space-4) var(--space-3); gap: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .wf-flow-line { animation: none; }
-  .wf-node-active { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--wf-c) 25%, transparent); }
+  .wf-flow-line--active { stroke-dasharray: none; animation: none; }
 }
 .wf-table-wrap { overflow-x: auto; }
 .wf-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: var(--text-sm); }
