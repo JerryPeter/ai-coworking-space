@@ -13,6 +13,7 @@ import Calendar from "./views/Calendar";
 import Dashboard from "./views/Dashboard";
 import Memory from "./views/Memory";
 import TaskBoard from "./views/TaskBoard";
+import WorkflowView from "./views/Workflow";
 
 // The 3D office pulls in Three.js; lazy-load it so other views don't pay for it.
 const Office = lazy(() => import("./views/Office"));
@@ -32,6 +33,7 @@ export default function App() {
       {view === "dashboard" && <Dashboard />}
       {view === "agents" && <Agents />}
       {view === "tasks" && <TaskBoard />}
+      {view === "workflow" && <WorkflowView />}
       {view === "calendar" && <Calendar />}
       {view === "activity" && <Activity />}
       {view === "memory" && <Memory />}
