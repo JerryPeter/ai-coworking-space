@@ -289,8 +289,9 @@ export function createNACs(th: TownHall): NacCrowd {
     defender.armL.rotation.z = 0.35; defender.armR.rotation.z = -0.35; // guard stance, arms out
     th.site.add(handler.root, defender.root, cut1.root, cut2.root);
 
-    const ball = new THREE.Mesh(geo("bball", () => new THREE.SphereGeometry(0.12, 12, 8)), lam("#d9641f"));
-    const seamH = new THREE.Mesh(geo("bballSeam", () => new THREE.TorusGeometry(0.12, 0.004, 4, 16)), lam("#1a1a1a"));
+    // Bright orange + thick dark seams: the court is #c0673e, a realistic #d9641f ball vanished against it.
+    const ball = new THREE.Mesh(geo("bball", () => new THREE.SphereGeometry(0.14, 12, 8)), lam("#ff8a1f"));
+    const seamH = new THREE.Mesh(geo("bballSeam", () => new THREE.TorusGeometry(0.14, 0.012, 4, 16)), lam("#1a1a1a"));
     const seamV = seamH.clone(); seamV.rotation.x = Math.PI / 2;
     ball.add(seamH, seamV); th.site.add(ball);
 
