@@ -203,6 +203,8 @@ const STAIR = { x: 1303, bottom: 1240, top: 1068 };
 const SEATS: Record<string, { floor: FloorNo; room: string; px: number; py: number; rot: number; node: string }> = {
   // Hawa (profile "default") → Ruang COO workstation, townhall.ts buildL2: put(g, Workstation(), 1725, 405, 180).
   default: { floor: 2, room: "Ruang COO", px: 1725, py: 405, rot: 180, node: "coo" },
+  // Goku (profile "goku_cto") -> Ruang CTO workstation, townhall.ts buildL2: put(g, Workstation(...), 1566, 405, 180).
+  goku_cto: { floor: 2, room: "Ruang CTO", px: 1566, py: 405, rot: 180, node: "cto" },
 };
 
 function hashStr(s: string) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
@@ -445,11 +447,11 @@ export class OfficeScene3D {
     }
     if (STATUS[status] && status !== prev) {
       d.status = status; a.since = Date.now(); a.lightMat.color.set(STATUS[status].color);
-      if (a.orb) { this.applyOrb(a); this.deskGlow(a); }
+      if (a.orb) { this.applyOrb(a); this.deskGlow(a); this.ctoFX(a); }
       else if (a.terminal) this.applyTerminal(a);
       else {
         const s = this.pickSpot(a);
-        if (s && s === a.spot && a.atSpot) { this.setPose(a, this.poseFor(a, s)); this.deskGlow(a); } else this.go(a, s);
+        if (s && s === a.spot && a.atSpot) { this.setPose(a, this.poseFor(a, s)); this.deskGlow(a); this.ctoFX(a); } else this.go(a, s);
         this.setDim(a, status === "offline");
       }
       changed = true;
@@ -671,6 +673,9 @@ export class OfficeScene3D {
     // Corridor east of the pods (x 1350) north to the collaboration area, east to the Ruang COO door gap (x 1650-1688, wall y 474).
     n2("cooA", 1350, 1000); n2("cooB", 1350, 500); n2("cooC", 1669, 500); n2("cooD", 1669, 440); n2("coo", 1669, 374);
     this.link(2, "arr", "cooA", "cooB", "cooC", "cooD", "coo");
+    // Ruang CTO: branch off the shared cooC corridor node, through the CTO door gap, to Goku's seat.
+    n2("ctoC", 1619, 500); n2("ctoD", 1619, 440); n2("cto", 1566, 374);
+    this.link(2, "cooC", "ctoC", "ctoD", "cto");
     Object.entries(SEATS).forEach(([profile, st]) => {
       const [x, z] = this.off(st.px, st.py, st.rot, 0, 0.62);
       this.spot(st.floor, st.room, "seat:" + profile, x, z, st.rot, "type", st.node, { y: 0.05 });
@@ -988,7 +993,7 @@ export class OfficeScene3D {
     if (a.orb) { // Claude CLI floats in the Lantai 2 work-area corner; its desk stays reserved.
       const ds = this.spots.filter((x) => x.use[0] === "desk"), s = ds[a.deskIdx % ds.length];
       this.claim(a, s); a.floor = 2; this.th.floors[2].add(a.group);
-      a.group.position.set(ORB_POS.x, FT, ORB_POS.z); a.atSpot = true; this.deskGlow(a);
+      a.group.position.set(ORB_POS.x, FT, ORB_POS.z); a.atSpot = true; this.deskGlow(a); this.ctoFX(a);
     } else if (a.terminal) {
       a.floor = 2; this.th.floors[2].add(a.group);
       a.group.position.set(OPENCODE_POS.x, FT, OPENCODE_POS.z); a.atSpot = true;
@@ -1003,7 +1008,7 @@ export class OfficeScene3D {
 
   private removeAgent(a: Agent3D) {
     if (a.spot && a.spot.by === a) a.spot.by = null;
-    a.atSpot = false; this.deskGlow(a);
+    a.atSpot = false; this.deskGlow(a); this.ctoFX(a);
     a.group.parent?.remove(a.group);
     a.tag.el.remove();
     a.group.traverse((o) => {
@@ -1067,6 +1072,15 @@ export class OfficeScene3D {
     m.emissive.setHex(on ? (st === "error" ? 0xd03a3a : 0x3fa6ee) : 0x000000);
     m.emissiveIntensity = on ? 0.9 : 1;
   }
+  /** Goku's Ruang CTO monitor + desk lamp: on only while he is seated at "cto" and status is working.
+   *  CTO-only for now (deliberate scope decision) — do not extend to Hawa/COO in this change. */
+  private ctoFX(a: Agent3D) {
+    if (a.data.id !== "goku_cto") return;
+    const on = a.atSpot && a.spot?.node === "cto" && a.data.status === "working";
+    const d = this.th.ctoDesk;
+    d.screen.emissive.set(on ? "#3fa6ee" : "#000000");
+    d.light.intensity = on ? 0.9 * Math.PI : 0;
+  }
   private pickSpot(a: Agent3D): Spot | null {
     const use = STATUS[a.data.status].use;
     if (a.data.status === "working") { const own = this.spots.find((s) => s.use[0] === "seat:" + a.data.id); if (own) return own; }
@@ -1087,13 +1101,13 @@ export class OfficeScene3D {
   private place(a: Agent3D, s: Spot) {
     this.claim(a, s); a.floor = s.floor; this.th.floors[s.floor].add(a.group);
     a.group.position.set(s.x, s.y, s.z); a.group.rotation.y = s.rot; a.lastNode = s.node; a.path = []; a.atSpot = true;
-    this.setPose(a, this.poseFor(a, s)); this.deskGlow(a);
+    this.setPose(a, this.poseFor(a, s)); this.deskGlow(a); this.ctoFX(a);
   }
   /** Walk to a spot: route to the stairs, climb/descend floor by floor, then route to the spot's node. */
   private go(a: Agent3D, s: Spot | null) {
     if (!s) return;
-    if (a.spot === s && (a.atSpot || a.path.length)) { this.deskGlow(a); return; }
-    this.claim(a, s); if (a.atSpot) a.group.position.y = FT; a.atSpot = false; this.deskGlow(a); this.setPose(a, "walk");
+    if (a.spot === s && (a.atSpot || a.path.length)) { this.deskGlow(a); this.ctoFX(a); return; }
+    this.claim(a, s); if (a.atSpot) a.group.position.y = FT; a.atSpot = false; this.deskGlow(a); this.ctoFX(a); this.setPose(a, "walk");
     if (this.reduce) { this.place(a, s); this.dirty = true; return; }
     const path: Waypoint[] = [];
     const add = (n: GNode) => path.push({ x: n.x, z: n.z, y: FT, node: n.id });
@@ -1122,7 +1136,7 @@ export class OfficeScene3D {
     }
     if (wp.spot) {
       a.group.rotation.y = wp.spot.rot; a.group.position.y = wp.spot.y; a.atSpot = true; a.lastNode = wp.spot.node;
-      this.setPose(a, this.poseFor(a, wp.spot)); this.deskGlow(a); this.dirty = true;
+      this.setPose(a, this.poseFor(a, wp.spot)); this.deskGlow(a); this.ctoFX(a); this.dirty = true;
     }
   }
   private stepAgent(a: Agent3D, dt: number, t: number) {
