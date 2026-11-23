@@ -1,6 +1,6 @@
 // App shell (spec 4.4 + 5.1): fixed sidebar, sticky top bar, scrolling content.
 import {
-  Activity, Box, Brain, CalendarDays, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
+  Activity, Box, Brain, CalendarDays, LayoutDashboard, LogOut, Moon, Network, PanelLeftClose, PanelLeftOpen,
   RefreshCw, SquareKanban, Sun, TriangleExclamationPoint, Users, Workflow, Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
@@ -20,6 +20,7 @@ export const NAV: NavDef[] = [
   { id: "activity", label: "Activity", title: "Activity", Icon: Activity, key: "v" },
   { id: "memory", label: "Memory", title: "Memory & Knowledge", Icon: Brain, key: "m" },
   { id: "workflow", label: "Workflow", title: "Alur Kerja Tim", Icon: Workflow, key: "w" },
+  { id: "graphify", label: "Graphify", title: "Graphify — Knowledge Graph", Icon: Network, key: "G" },
   { id: "token-monitor", label: "Token Monitor", title: "Token Monitor", Icon: Zap, key: "k" },
   { id: "office", label: "3D Office", title: "3D Office", Icon: Box, key: "o" },
 ];
@@ -58,7 +59,7 @@ export function AppShell({ children, subtitle }: { children: ReactNode; subtitle
   const toggleRef = useRef(toggleSidebar);
   toggleRef.current = toggleSidebar;
 
-  // Keyboard: "[" toggles the sidebar; "g" then d/a/t/c/v/m/w/o navigates (spec 8).
+  // Keyboard: "[" toggles the sidebar; "g" then d/a/t/c/v/m/w/k/o/G navigates (spec 8).
   useEffect(() => {
     let gAt = 0;
     const onKey = (e: KeyboardEvent) => {

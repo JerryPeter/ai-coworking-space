@@ -272,3 +272,59 @@ export interface UsageLimits {
     unavailable_reason: string | null;
   };
 }
+
+// GET /api/graphify/* (api/sources/graphify.py). graph.json is read-only, parsed once and cached
+// in memory keyed by its mtime. A 404 on any of these means graph.json/GRAPH_REPORT.md hasn't
+// been generated yet — the frontend shows an empty state with an "Update Graph" button.
+export interface GraphifyStatsResponse {
+  total_nodes: number;
+  total_edges: number;
+  communities: number;
+  import_cycles: number;
+  import_cycle_details: string[];
+  graphify_version: string | null;
+  built_at_commit: string | null;
+  current_commit: string | null;
+  stale: boolean;
+  last_updated: string; // ISO8601, graph.json mtime
+  source: string;
+}
+
+export type GraphifyNodeType = "class" | "function" | "module" | "external" | "concept" | "rationale" | "other";
+export interface GraphifyNode {
+  id: string;
+  label: string;
+  degree: number;
+  community: number | null;
+  community_name: string | null;
+  type: GraphifyNodeType;
+}
+export interface GraphifyTopNodesResponse { nodes: GraphifyNode[]; limit: number; source: string }
+
+export interface GraphifyFindingDetail {
+  source_file?: string | null;
+  community_name?: string | null;
+  neighbors_by_relation?: { relation: string; count: number }[];
+  recommendation?: string;
+  backend_communities?: string[];
+  cross_boundary_edges?: number;
+  import_cycles?: number;
+}
+export interface GraphifyFinding {
+  id: string;
+  title: string;
+  status: "warning" | "ok";
+  degree: number | null;
+  detail: GraphifyFindingDetail;
+}
+export interface GraphifyFindingsResponse { findings: GraphifyFinding[]; source: string }
+
+export type GraphifyJobStatus = "queued" | "running" | "succeeded" | "failed";
+export interface GraphifyJobResponse {
+  job_id: string;
+  status: GraphifyJobStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  returncode: number | null;
+  log_tail: string[];
+}

@@ -2,8 +2,8 @@
 // serves index.html at "/", so deep paths like /agents would 404 on reload.
 import { useSyncExternalStore } from "react";
 
-export type ViewId = "dashboard" | "agents" | "tasks" | "calendar" | "activity" | "memory" | "office" | "workflow" | "token-monitor";
-export const VIEW_IDS: ViewId[] = ["dashboard", "agents", "tasks", "calendar", "activity", "memory", "office", "workflow", "token-monitor"];
+export type ViewId = "dashboard" | "agents" | "tasks" | "calendar" | "activity" | "memory" | "office" | "workflow" | "token-monitor" | "graphify";
+export const VIEW_IDS: ViewId[] = ["dashboard", "agents", "tasks", "calendar", "activity", "memory", "office", "workflow", "token-monitor", "graphify"];
 
 export interface Route { view: ViewId; params: URLSearchParams }
 

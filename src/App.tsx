@@ -11,6 +11,7 @@ import Activity from "./views/Activity";
 import Agents from "./views/Agents";
 import Calendar from "./views/Calendar";
 import Dashboard from "./views/Dashboard";
+import Graphify from "./views/Graphify";
 import Memory from "./views/Memory";
 import TaskBoard from "./views/TaskBoard";
 import TokenMonitor from "./views/TokenMonitor";
@@ -35,6 +36,7 @@ export default function App() {
       {view === "agents" && <Agents />}
       {view === "tasks" && <TaskBoard />}
       {view === "workflow" && <WorkflowView />}
+      {view === "graphify" && <Graphify />}
       {view === "token-monitor" && <TokenMonitor />}
       {view === "calendar" && <Calendar />}
       {view === "activity" && <Activity />}

@@ -5,7 +5,8 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import type {
-  AgentsResponse, CronJobsResponse, CronRunsResponse, DashboardSummary, KanbanResponse,
+  AgentsResponse, CronJobsResponse, CronRunsResponse, DashboardSummary, GraphifyFindingsResponse,
+  GraphifyJobResponse, GraphifyStatsResponse, GraphifyTopNodesResponse, KanbanResponse,
   MemoryResponse, OfficeStateResponse, OpenClawAgentsResponse, SessionsResponse, SkillsResponse, ToolsResponse,
   UsageLimits, UsageSummary,
 } from "./types";
@@ -50,9 +51,11 @@ export function useToken(): string | null {
 // ---------- fetch ----------
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  body?: unknown;
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -86,6 +89,43 @@ export async function apiGet<T>(path: string, opts: { token?: string; signal?: A
   return (await res.json()) as T;
 }
 
+/** POST with the same bearer token + 401 handling as apiGet. Non-2xx responses still parse JSON
+ * and attach it as `ApiError.body` (e.g. a 409's `{detail: {job_id}}` so the caller can adopt the
+ * already-running job instead of just showing an error — see Graphify's Update Graph button). */
+export async function apiPost<T>(path: string, body?: unknown, opts: { token?: string; signal?: AbortSignal } = {}): Promise<T> {
+  const token = opts.token ?? getToken();
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: "POST",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        Accept: "application/json",
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: opts.signal,
+    });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    connection.set(false);
+    throw new ApiError(0, `Network error: ${(e as Error).message}`);
+  }
+  connection.set(true);
+  if (res.status === 401) {
+    if (!opts.token) setToken(null);
+    throw new ApiError(401, "Unauthorized: token missing or rejected");
+  }
+  let json: unknown = null;
+  try { json = await res.json(); } catch { /* no/invalid body */ }
+  if (!res.ok) {
+    const d = (json as { detail?: unknown } | null)?.detail;
+    const detail = typeof d === "string" ? d : JSON.stringify(d ?? json ?? res.statusText);
+    throw new ApiError(res.status, `HTTP ${res.status}: ${detail}`, json);
+  }
+  return json as T;
+}
+
 // Typed endpoint paths.
 export const endpoints = {
   agents: "/api/agents",
@@ -101,6 +141,12 @@ export const endpoints = {
   usageLimits: "/api/usage/limits",
   memory: (p: string): MemoryPath => `/api/memory/${encodeURIComponent(p)}`,
   skills: (p: string): SkillsPath => `/api/skills/${encodeURIComponent(p)}`,
+  graphifyStats: "/api/graphify/stats",
+  graphifyTopNodes: "/api/graphify/top-nodes?limit=10",
+  graphifyFindings: "/api/graphify/findings",
+  graphifyUpdate: "/api/graphify/update",
+  graphifyUpdateJob: (jobId: string): GraphifyJobPath => `/api/graphify/update/${jobId}`,
+  graphifyGraphHtml: "/api/graphify/graph.html",
 } as const;
 
 export interface EndpointTypes {
@@ -115,12 +161,17 @@ export interface EndpointTypes {
   "/api/activity/sessions?limit=1000": SessionsResponse;
   "/api/usage/summary?days=30": UsageSummary;
   "/api/usage/limits": UsageLimits;
+  "/api/graphify/stats": GraphifyStatsResponse;
+  "/api/graphify/top-nodes?limit=10": GraphifyTopNodesResponse;
+  "/api/graphify/findings": GraphifyFindingsResponse;
 }
 export type MemoryPath = `/api/memory/${string}`;
 export type SkillsPath = `/api/skills/${string}`;
+export type GraphifyJobPath = `/api/graphify/update/${string}`;
 type PathData<P extends string> = P extends keyof EndpointTypes ? EndpointTypes[P]
   : P extends MemoryPath ? MemoryResponse
   : P extends SkillsPath ? SkillsResponse
+  : P extends GraphifyJobPath ? GraphifyJobResponse
   : unknown;
 
 // ---------- connection + freshness (global, for top bar / footer) ----------

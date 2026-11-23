@@ -20,7 +20,7 @@ if not logger.handlers:
 def setup_middleware(app: FastAPI) -> None:
     # Local single-user app: only the app's own origin and the Vite dev server. (In dev the Vite
     # proxy makes requests same-origin anyway; the :5173 entries only matter if a page calls
-    # :8742 directly.) Read-only API -> GET only.
+    # :8742 directly.) Mostly a read-only API; POST is needed only for /api/graphify/update.
     origins = {
         f"http://{config.BIND_HOST}:{config.BIND_PORT}",
         f"http://localhost:{config.BIND_PORT}",
@@ -31,7 +31,7 @@ def setup_middleware(app: FastAPI) -> None:
         CORSMiddleware,
         allow_origins=sorted(origins),
         allow_credentials=False,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["Authorization", "Content-Type"],
     )
 

@@ -747,3 +747,17 @@ table.simple td { padding: 8px; border-bottom: 1px solid var(--border-subtle); }
 /* Token Monitor: five overview tiles share one row when there is room */
 .tiles.tm-tiles { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .tiles.tm-tiles .tile { grid-column: auto; }
+
+/* ============ Graphify ============ */
+/* CTO correction #3: scope the 1-column tile breakpoint to Graphify only (not global .tiles .tile,
+   to avoid a Dashboard/TokenMonitor layout regression). */
+@media (max-width: 640px) { .graphify-tiles .tile { grid-column: span 12; } }
+/* "Buka Interactive Graph" full-width on narrow screens (spec §7.3), reusable by future views. */
+.btn-block { width: 100%; justify-content: center; }
+/* Sortable Top Nodes table headers (spec §7.5 / CTO correction #4: desc <-> asc only, no "none"). */
+.th-sort-btn {
+  display: inline-flex; align-items: center; gap: 4px; background: none; border: 0;
+  color: inherit; font: inherit; cursor: pointer; padding: 0;
+}
+.th-sort-btn:hover { color: var(--text-primary); }
+.th-sort-btn:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
