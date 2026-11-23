@@ -85,7 +85,11 @@ function Connector({ from, to }: { from: FlowNode[]; to: FlowNode[] }) {
       <defs>
         {links.map((l, i) => (
           <Fragment key={i}>
-            <linearGradient id={`${uid}g${i}`} x1="0%" y1="0%" x2="100%" y2="0%">
+            {/* userSpaceOnUse is required: with the default objectBoundingBox units a horizontal line
+                (1 -> 1 node, y1 === y2) has a zero-height bbox, so the gradient paint is invalid and the
+                line is not rendered at all (only its marker shows) - that also hid the flow animation. */}
+            <linearGradient id={`${uid}g${i}`} gradientUnits="userSpaceOnUse"
+              x1="0" y1={slot(l.a, from.length)} x2="100%" y2={slot(l.b, to.length)}>
               <stop offset="0%" style={{ stopColor: nodeColor(l.src) }} />
               <stop offset="100%" style={{ stopColor: nodeColor(l.tgt) }} />
             </linearGradient>
@@ -149,7 +153,8 @@ export default function WorkflowView() {
         </div>
         <div className="card wf-card">
           <h2 className="wf-flow-title">{flow.title}</h2>
-          <Diagram flow={flow} />
+          {/* key: remount per tab so gradient/marker ids and the CSS dash animation start fresh on every switch */}
+          <Diagram key={flow.key} flow={flow} />
         </div>
       </section>
       <section className="section">
