@@ -8,10 +8,17 @@
 //   - size: 0.85x the agent model
 // The receptionist (Lantai 1 lobby desk) is a NAC too: female, navy blazer, seated with a light idle (turn / nod).
 //
-// Layout (floor-plan px, see townhall.ts wx/wz): 34 NACs + receptionist
+// Layout (floor-plan px, see townhall.ts wx/wz): 46 NACs + receptionist
 //   Lantai 1 Ruang Kerja 5 · Lantai 2 Area Kerja Agen (orbs) 4 + Area Kolaborasi/Training/Library/Coffee 5
 //   Lobby 4 · outside 9 · corridors/stairs 3 · Lantai 3 4
+//   Area Olahraga (belakang gedung, site group, see townhall.ts "===== sports area =====") 12:
+//     tenis 2 (rally berhadapan + bola bebas), basket 4 (half-court 2v2 + dribble/jump shot),
+//     badminton 2 (rally + kok bebas), kolam 4 (2 berenang + 2 duduk di pinggir deck)
 // Paths are short straight lanes inside open floor area (no wall crossings); walkers pace slowly and pause at the ends.
+// Sports NAC are built/animated separately below (court/net/hoop/pool props already exist in townhall.ts; this
+// file only adds the people + their held/free props - see Goku brief 2026-11-23 sports-nac_bulma-spec + CTO
+// corrections). Each zone's update() runs off its own LOCAL clock that advances only while dt > 0 (never the
+// global t), so prefers-reduced-motion (dt=0) freezes rallies/jumps cleanly instead of jumping ahead on resume.
 import * as THREE from "three";
 import { FT, wx, wz, type TownHall } from "./townhall";
 
@@ -167,6 +174,211 @@ export function createNACs(th: TownHall): NacCrowd {
     nacs.push({ ...r, toB: true, pause: 0, speed: 0, ph: 0.4, baseRot: FACE.W, seated: true });
   }
 
+  /* ================= Sports NAC (Task 1, Goku brief 2026-11-23) =================
+     12 new NAC in the existing outdoor sports area (townhall.ts "===== sports area ====="):
+     tenis 2, basket 4, badminton 2, kolam 4 (2 berenang + 2 duduk). Built/animated independently
+     of the generic SPECS/step() walkers above (zero risk of regressing the other 34 + receptionist):
+     each zone keeps its own small closure state and a LOCAL clock that only advances when the
+     caller passes dt > 0 - never reads the global t - so freezing for reduced motion (dt=0, see the
+     returned update() below) truly freezes mid-rally/mid-jump instead of jumping ahead on resume.
+     No `new THREE.Vector3()`/`Vector2()` (or any other allocation) happens inside any update() path. */
+  const SPORT_LIGHT = ["#a3a3a3", "#adadad"]; // Bulma spec 2: brighter grey variant, sports-only
+  const ACCENT_RACKET = "#5c6670", ACCENT_BASKET = "#7a4b3a"; // dim accent headbands, no names/labels
+  const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
+  const ease = (p: number) => (p < 0.5 ? 2 * p * p : 1 - 2 * (1 - p) * (1 - p));
+
+  function addHeadband(head: THREE.Group, color: string) { box(head, 0.37, 0.05, 0.08, 0, 0.2, 0.15, color, false); }
+
+  /** Racket prop, child of armR (~hand height, spec 2.3). Swings with the arm via armR.rotation. */
+  function addRacket(armR: THREE.Group, kind: "tennis" | "badminton", accent: string) {
+    const grp = new THREE.Group(); grp.position.set(0, -0.5, 0.05); armR.add(grp);
+    if (kind === "tennis") {
+      const handle = new THREE.Mesh(geo("rktHandleT", () => new THREE.CylinderGeometry(0.018, 0.02, 0.22, 6)), lam("#2b2e31"));
+      handle.rotation.z = Math.PI / 2; handle.position.x = 0.11; grp.add(handle);
+      const frame = new THREE.Mesh(geo("rktFrameT", () => new THREE.TorusGeometry(0.115, 0.012, 6, 16)), lam("#1d1f22"));
+      frame.position.x = 0.31; grp.add(frame);
+      const acc = new THREE.Mesh(geo("rktAccT", () => new THREE.TorusGeometry(0.115, 0.004, 4, 16, Math.PI * 0.4)), lam(accent));
+      acc.position.set(0.31, 0, 0.001); grp.add(acc);
+      const str = new THREE.Mesh(geo("rktStrT", () => new THREE.CircleGeometry(0.1, 10)),
+        new THREE.MeshBasicMaterial({ color: "#e8e8e8", transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
+      str.position.x = 0.31; grp.add(str);
+    } else {
+      const handle = new THREE.Mesh(geo("rktHandleB", () => new THREE.CylinderGeometry(0.014, 0.016, 0.24, 6)), lam("#3a3a3a"));
+      handle.rotation.z = Math.PI / 2; handle.position.x = 0.12; grp.add(handle);
+      const frame = new THREE.Mesh(geo("rktFrameB", () => new THREE.TorusGeometry(0.095, 0.009, 6, 16)), lam("#2f2f2f"));
+      frame.position.x = 0.3; grp.add(frame);
+      const str = new THREE.Mesh(geo("rktStrB", () => new THREE.CircleGeometry(0.082, 10)),
+        new THREE.MeshBasicMaterial({ color: "#f0f0f0", transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+      str.position.x = 0.3; grp.add(str);
+    }
+  }
+  function makeTennisBall() { return new THREE.Mesh(geo("tennisBall", () => new THREE.SphereGeometry(0.033, 10, 8)), lam("#c7e03a")); }
+  function makeShuttle() {
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(geo("shuttleCork", () => new THREE.SphereGeometry(0.03, 8, 6)), lam("#e8d7b0")));
+    const ring = new THREE.Mesh(geo("shuttleRing", () => new THREE.TorusGeometry(0.032, 0.006, 4, 10)), lam("#d8d8d8"));
+    ring.rotation.x = Math.PI / 2; ring.position.y = 0.01; g.add(ring);
+    const feather = new THREE.Mesh(geo("shuttleFeather", () => new THREE.ConeGeometry(0.075, 0.13, 8)), lam("#f5f5f5"));
+    feather.position.y = 0.09; g.add(feather);
+    return g;
+  }
+
+  /** Tennis (#1/#2) and badminton (#7/#8) share the same "always face the net, side-step, ball/kok
+   *  is a free deterministic-parabola object" rally model (CTO corrections K1/K2). */
+  function buildRallySport(cfg: {
+    centerXW: number; ampXW: number; zA: number; zB: number; groundY: number;
+    peakH: number; THalf: number; kind: "tennis" | "badminton"; accent: string;
+    skinA: string; skinB: string; hairA: string; hairB: string;
+  }) {
+    const A = build({ shirt: SPORT_LIGHT[0], pants: NAC_PANTS, skin: cfg.skinA, hair: cfg.hairA });
+    const B = build({ shirt: SPORT_LIGHT[1], pants: NAC_PANTS, skin: cfg.skinB, hair: cfg.hairB });
+    A.root.position.set(cfg.centerXW, cfg.groundY, cfg.zA); A.root.rotation.y = FACE.S; // north side faces S (net)
+    B.root.position.set(cfg.centerXW, cfg.groundY, cfg.zB); B.root.rotation.y = FACE.N; // south side faces N (net)
+    th.site.add(A.root, B.root);
+    addHeadband(A.head, cfg.accent); addHeadband(B.head, cfg.accent);
+    addRacket(A.armR, cfg.kind, cfg.accent); addRacket(B.armR, cfg.kind, cfg.accent);
+    const ball = cfg.kind === "tennis" ? makeTennisBall() : makeShuttle();
+    th.site.add(ball);
+
+    let clock = 0;
+    const targetX = (k: number) => cfg.centerXW + Math.sin(k * 1.7) * cfg.ampXW; // deterministic "landing spot"
+    const prevTarget = (k: number) => (k < 0 ? cfg.centerXW : targetX(k));
+    const burstFrac = 0.3 / cfg.THalf, swingAmp = cfg.kind === "tennis" ? 0.6 : 0.5;
+    return {
+      update(dt: number) {
+        clock += dt;
+        const k = Math.floor(clock / cfg.THalf), p = (clock - k * cfg.THalf) / cfg.THalf;
+        const aToB = k % 2 === 0; // k even: A (north) hits -> ball travels to B (south)
+        let xA: number, xB: number;
+        if (aToB) { xA = prevTarget(k - 1); xB = lerp(prevTarget(k - 2), targetX(k), ease(p)); }
+        else { xB = prevTarget(k - 1); xA = lerp(prevTarget(k - 2), targetX(k), ease(p)); }
+        A.root.position.x = xA; B.root.position.x = xB;
+        // side-step shuffle for whichever one is gliding this half (body never rotates - K1)
+        const shuffle = Math.sin(clock * 6) * 0.3, movA = aToB ? 0 : 1, movB = aToB ? 1 : 0;
+        A.legL.rotation.x = shuffle * movA; A.legR.rotation.x = -shuffle * movA; A.armL.rotation.x = -shuffle * 0.2 * movA;
+        B.legL.rotation.x = shuffle * movB; B.legR.rotation.x = -shuffle * movB; B.armL.rotation.x = -shuffle * 0.2 * movB;
+        A.body.position.y = Math.sin(clock * 1.8) * 0.01; B.body.position.y = Math.sin(clock * 1.8 + 1.4) * 0.01;
+        // hitter's forehand/overhead burst (~0.3s), synced to the moment the ball leaves their side (K1/K2)
+        const burst = p < burstFrac ? Math.sin((p / burstFrac) * Math.PI) * swingAmp : 0;
+        const base = cfg.kind === "badminton" ? -0.3 : 0;
+        if (cfg.kind === "tennis") {
+          if (aToB) { A.armR.rotation.z = burst; B.armR.rotation.z *= 0.8; }
+          else { B.armR.rotation.z = burst; A.armR.rotation.z *= 0.8; }
+        } else if (aToB) { A.armR.rotation.x = base + burst; B.armR.rotation.x *= 0.8; }
+        else { B.armR.rotation.x = base + burst; A.armR.rotation.x *= 0.8; }
+        // ball/kok: deterministic parabola from the hitter's x to this shot's landing x (K2)
+        const fromX = aToB ? xA : xB, bx = lerp(fromX, targetX(k), p);
+        const bz = aToB ? lerp(cfg.zA, cfg.zB, p) : lerp(cfg.zB, cfg.zA, p);
+        ball.position.set(bx, cfg.groundY + 4 * cfg.peakH * p * (1 - p), bz);
+      },
+    };
+  }
+
+  /** Basketball (#3-#6): half-court 2v2 at the north hoop only (K3), not two pairs at two ends. */
+  function buildBasketball() {
+    const groundY = 0.06, hoopX = wx(1480), hoopZ = wz(-1130), hoopY = 3.05, HAND_H = 0.95;
+    const handler = build({ shirt: SPORT_LIGHT[0], pants: NAC_PANTS, skin: SKINS[0], hair: HAIRS[0] });
+    const defender = build({ shirt: SPORT_LIGHT[1], pants: NAC_PANTS, skin: SKINS[1], hair: HAIRS[1] });
+    const cut1 = build({ shirt: SPORT_LIGHT[0], pants: NAC_PANTS, skin: SKINS[2], hair: HAIRS[2] });
+    const cut2 = build({ shirt: SPORT_LIGHT[1], pants: NAC_PANTS, skin: SKINS[3], hair: HAIRS[3] });
+    handler.root.position.set(wx(1480), groundY, wz(-720)); handler.root.rotation.y = FACE.N; // faces the hoop
+    defender.root.position.set(wx(1480), groundY, wz(-860)); defender.root.rotation.y = FACE.S; // faces the handler
+    cut1.root.position.set(wx(1340), groundY, wz(-950)); cut1.root.rotation.y = FACE.N;
+    cut2.root.position.set(wx(1620), groundY, wz(-950)); cut2.root.rotation.y = FACE.N;
+    for (const h of [handler, defender, cut1, cut2]) addHeadband(h.head, ACCENT_BASKET);
+    defender.armL.rotation.z = 0.35; defender.armR.rotation.z = -0.35; // guard stance, arms out
+    th.site.add(handler.root, defender.root, cut1.root, cut2.root);
+
+    const ball = new THREE.Mesh(geo("bball", () => new THREE.SphereGeometry(0.12, 12, 8)), lam("#d9641f"));
+    const seamH = new THREE.Mesh(geo("bballSeam", () => new THREE.TorusGeometry(0.12, 0.004, 4, 16)), lam("#1a1a1a"));
+    const seamV = seamH.clone(); seamV.rotation.x = Math.PI / 2;
+    ball.add(seamH, seamV); th.site.add(ball);
+
+    let clock = 0;
+    const T_JUMP = 6, JUMP_DUR = 0.9;
+    return {
+      update(dt: number) {
+        clock += dt;
+        const jt = clock % T_JUMP;
+        const handX = handler.root.position.x + 0.22, handZ = handler.root.position.z;
+        if (jt < JUMP_DUR) { // every ~6s: jump + shot arcs to the hoop, then comes back (K3)
+          const q = jt / JUMP_DUR, jump4 = 4 * q * (1 - q);
+          handler.body.position.y = jump4 * 0.35;
+          handler.armL.rotation.x = handler.armR.rotation.x = -1.6 * jump4;
+          const bx = q <= 0.5 ? lerp(handX, hoopX, q / 0.5) : lerp(hoopX, handX, (q - 0.5) / 0.5);
+          const bz = q <= 0.5 ? lerp(handZ, hoopZ, q / 0.5) : lerp(hoopZ, handZ, (q - 0.5) / 0.5);
+          ball.position.set(bx, HAND_H + (hoopY + 0.3 - HAND_H) * jump4, bz);
+        } else { // normal dribble: bola memantul tangan<->lantai, |sin| (Bulma spec 4)
+          handler.body.position.y = 0; handler.armR.rotation.x = -0.3;
+          const bounce = Math.abs(Math.sin(clock * 3));
+          ball.position.set(handX, groundY + (HAND_H - groundY) * bounce, handZ);
+        }
+        const shuffle = Math.sin(clock * 3) * 0.2;
+        handler.legL.rotation.x = shuffle; handler.legR.rotation.x = -shuffle;
+        defender.legL.rotation.x = -shuffle * 0.6; defender.legR.rotation.x = shuffle * 0.6;
+        for (const [c, ph] of [[cut1, 0], [cut2, 1.6]] as const) {
+          c.root.position.x = (c === cut1 ? wx(1340) : wx(1620)) + Math.sin(clock * 0.4 + ph) * 0.6;
+          const cs = Math.sin(clock * 5 + ph) * 0.3;
+          c.legL.rotation.x = cs; c.legR.rotation.x = -cs; c.armL.rotation.x = -cs * 0.6; c.armR.rotation.x = cs * 0.6;
+        }
+      },
+    };
+  }
+
+  /** Pool swimmers (#9/#10): root rides the water surface (NOT FT), legs hidden - K4/spec 4-5. */
+  function buildSwimmer(a: [number, number], b: [number, number], shirt: string, skin: string, hair: string, ph: number) {
+    const m = build({ shirt, pants: NAC_PANTS, skin, hair });
+    const waterY = 0.14, ax = wx(a[0]), bx = wx(b[0]), az = wz(a[1]);
+    m.root.position.set(ax, waterY, az); m.legL.visible = false; m.legR.visible = false;
+    th.site.add(m.root);
+    let clock = 0, dir = 1, x = ax;
+    const speed = 0.2, lo = Math.min(ax, bx), hi = Math.max(ax, bx);
+    return {
+      update(dt: number) {
+        clock += dt;
+        x += dir * speed * dt;
+        if (x >= hi) { x = hi; dir = -1; } else if (x <= lo) { x = lo; dir = 1; }
+        m.root.position.x = x; m.root.rotation.y = dir > 0 ? FACE.E : FACE.W;
+        m.body.position.y = -0.235 + Math.sin(clock * 1.2 + ph) * 0.025; // ~50% submerged (K4)
+        const s = Math.sin(clock * 0.9 * 2 * Math.PI + ph);
+        m.armL.rotation.x = s * 0.35; m.armR.rotation.x = -s * 0.35;
+      },
+    };
+  }
+
+  /** Pool-edge sitters (#11/#12): seated on the existing deck (top 0.12m), legs straight over the
+   *  water (no shin/depth - K4), idle breathing + head look-around only (no arm animation). */
+  function buildPoolSitter(px: number, py: number, shirt: string, skin: string, hair: string) {
+    const m = build({ shirt, pants: NAC_PANTS, skin, hair });
+    const SEAT = 0.12;
+    m.root.position.set(wx(px), 0, wz(py)); m.root.rotation.y = FACE.N; // faces the pool
+    m.body.position.y = SEAT - 0.45 * NAC_SCALE;
+    m.legL.rotation.x = m.legR.rotation.x = -Math.PI / 2;
+    m.armL.rotation.x = m.armR.rotation.x = -0.3; // relaxed, static
+    th.site.add(m.root);
+    let clock = 0; const ph = (px * 0.013) % (Math.PI * 2);
+    return {
+      update(dt: number) {
+        clock += dt;
+        m.body.position.y = SEAT - 0.45 * NAC_SCALE + Math.sin(clock * 1.8 + ph) * 0.012 + 0.012;
+        m.head.rotation.y = Math.sin(clock * 0.45 + ph) * 0.5;
+      },
+    };
+  }
+
+  const sports = [
+    buildRallySport({ centerXW: wx(800), ampXW: 3.0, zA: wz(-750), zB: wz(-180), groundY: 0.06,
+      peakH: 1.5, THalf: 1.0, kind: "tennis", accent: ACCENT_RACKET, skinA: SKINS[0], skinB: SKINS[1], hairA: HAIRS[0], hairB: HAIRS[1] }),
+    buildRallySport({ centerXW: (wx(1480) + wx(1620)) / 2, ampXW: 1.4, zA: wz(-1750), zB: wz(-1420), groundY: 0.06,
+      peakH: 2.2, THalf: 1.4, kind: "badminton", accent: ACCENT_RACKET, skinA: SKINS[2], skinB: SKINS[3], hairA: HAIRS[2], hairB: HAIRS[3] }),
+    buildBasketball(),
+    buildSwimmer([750, -2520], [1050, -2520], SPORT_LIGHT[0], SKINS[4], HAIRS[0], 0),
+    buildSwimmer([700, -2320], [950, -2320], SPORT_LIGHT[1], SKINS[5], HAIRS[1], 2.3),
+    buildPoolSitter(850, -2190, SPORT_LIGHT[0], SKINS[0], HAIRS[2]),
+    buildPoolSitter(1150, -2190, SPORT_LIGHT[1], SKINS[1], HAIRS[3]),
+  ];
+  const SPORTS_NAC_COUNT = 12; // 2 tenis + 4 basket + 2 badminton + 4 kolam
+
   const v = new THREE.Vector2();
   function step(n: Nac, dt: number, t: number) {
     if (n.seated) { // receptionist: look at the monitor / lobby, nod every ~7 s
@@ -199,7 +411,11 @@ export function createNACs(th: TownHall): NacCrowd {
   }
 
   return {
-    count: nacs.length,
-    update(dt: number, t: number) { if (dt <= 0) return; for (const n of nacs) step(n, dt, t); },
+    count: nacs.length + SPORTS_NAC_COUNT,
+    update(dt: number, t: number) {
+      if (dt <= 0) return;
+      for (const n of nacs) step(n, dt, t);
+      for (const s of sports) s.update(dt);
+    },
   };
 }
