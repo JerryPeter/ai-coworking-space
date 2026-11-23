@@ -9,10 +9,11 @@ which is acceptable for a single local dev server.
 """
 import json
 import re
+import os
 import shutil
+import signal
 import subprocess
 import threading
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -321,6 +322,7 @@ def _run_job(job: dict) -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            start_new_session=True,  # own process group, so the watchdog can kill children too
         )
     except OSError as e:
         _finish(job, "failed", None, [f"Failed to start graphify: {e}"])
@@ -329,18 +331,28 @@ def _run_job(job: dict) -> None:
     job["status"] = "running"
     job["pid"] = proc.pid
     lines: list[str] = []
-    deadline = time.monotonic() + UPDATE_TIMEOUT_S
-    timed_out = False
+    timed_out = threading.Event()
+
+    def _kill_on_timeout() -> None:
+        # Watchdog: fires even if graphify hangs silently (a per-line deadline check would not).
+        timed_out.set()
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # children may hold stdout open
+        except ProcessLookupError:
+            pass
+
+    watchdog = threading.Timer(UPDATE_TIMEOUT_S, _kill_on_timeout)
+    watchdog.daemon = True
+    watchdog.start()
     assert proc.stdout is not None
-    for line in proc.stdout:
-        lines.append(line.rstrip("\n"))
-        if len(lines) > LOG_TAIL_LINES:
-            lines.pop(0)
-        if time.monotonic() > deadline:
-            timed_out = True
-            proc.kill()
-            break
-    if timed_out:
+    try:
+        for line in proc.stdout:
+            lines.append(line.rstrip("\n"))
+            if len(lines) > LOG_TAIL_LINES:
+                lines.pop(0)
+    finally:
+        watchdog.cancel()
+    if timed_out.is_set():
         proc.wait(timeout=5)
         lines.append(f"Killed: exceeded {UPDATE_TIMEOUT_S}s timeout")
         _finish(job, "failed", -9, lines)
