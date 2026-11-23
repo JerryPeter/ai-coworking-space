@@ -207,6 +207,12 @@ const SEATS: Record<string, { floor: FloorNo; room: string; px: number; py: numb
   goku_cto: { floor: 2, room: "Ruang CTO", px: 1566, py: 405, rot: 180, node: "cto" },
 };
 
+/** Seat owners whose private-room monitor + desk lamp light up while working there (TownHall ctoDesk / cooDesk). */
+const SEAT_FX: Record<string, { node: string; desk: "ctoDesk" | "cooDesk" }> = {
+  goku_cto: { node: "cto", desk: "ctoDesk" },
+  default: { node: "coo", desk: "cooDesk" },
+};
+
 function hashStr(s: string) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
 function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h - r);
@@ -1151,12 +1157,13 @@ export class OfficeScene3D {
     m.emissive.setHex(on ? (st === "error" ? 0xd03a3a : 0x3fa6ee) : 0x000000);
     m.emissiveIntensity = on ? 0.9 : 1;
   }
-  /** Goku's Ruang CTO monitor + desk lamp: on only while he is seated at "cto" and status is working.
-   *  CTO-only for now (deliberate scope decision) — do not extend to Hawa/COO in this change. */
+  /** Private-room monitor + desk lamp: on only while the seat owner is seated at their node and status is working.
+   *  Goku (goku_cto) → Ruang CTO, Hawa (profile "default") → Ruang COO. No-op for every other agent. */
   private ctoFX(a: Agent3D) {
-    if (a.data.id !== "goku_cto") return;
-    const on = a.atSpot && a.spot?.node === "cto" && a.data.status === "working";
-    const d = this.th.ctoDesk;
+    const cfg = SEAT_FX[a.data.id];
+    if (!cfg) return;
+    const on = a.atSpot && a.spot?.node === cfg.node && a.data.status === "working";
+    const d = this.th[cfg.desk];
     d.screen.emissive.set(on ? "#3fa6ee" : "#000000");
     d.light.intensity = on ? 0.9 * Math.PI : 0;
   }

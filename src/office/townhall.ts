@@ -55,6 +55,8 @@ export interface TownHall {
   deskScreens: THREE.MeshLambertMaterial[];
   /** Ruang CTO (Lantai 2) desk: own screen material, desk lamp, and one PointLight (intensity 0 = off). Not part of deskScreens. */
   ctoDesk: { screen: THREE.MeshLambertMaterial; lamp: THREE.Group; light: THREE.PointLight };
+  /** Ruang COO (Lantai 2) desk = Hawa's seat: same structure as ctoDesk (intensity 0 = off). Not part of deskScreens. */
+  cooDesk: { screen: THREE.MeshLambertMaterial; lamp: THREE.Group; light: THREE.PointLight };
   cornerLamps: THREE.PointLight[];
   labels: THLabel[];
   readonly mode: FloorMode;
@@ -528,6 +530,7 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
   const deskScreens: THREE.MeshLambertMaterial[] = [];
   const deskAnchors: THREE.Object3D[] = [];
   let ctoScreen!: THREE.MeshLambertMaterial, ctoLampGroup!: THREE.Group, ctoLight!: THREE.PointLight;
+  let cooScreen!: THREE.MeshLambertMaterial, cooLampGroup!: THREE.Group, cooLight!: THREE.PointLight;
   function Workstation(track = false, customScreen?: THREE.Material) {
     const o = G(); bx(o, 1.3, 0.04, 0.65, "#c49a6c", 0, 0.72, 0); for (const s of [-1, 1]) bx(o, 0.04, 0.72, 0.6, "#25282c", s * 0.62, 0, 0);
     let sm: THREE.Material = screenMat;
@@ -1047,7 +1050,9 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     put(g, Toilet(), 1163, 510, 90); put(g, Sink(), 1110, 484, 180);
     // Manager rooms B, C
     ctoScreen = new THREE.MeshLambertMaterial({ color: "#1d2733", emissive: "#000000", emissiveIntensity: 0.9 });
-    put(g, Workstation(false, ctoScreen), 1566, 405, 180); put(g, Workstation(), 1725, 405, 180); put(g, Plant(0.8), 1505, 320); put(g, Plant(0.8), 1790, 320);
+    put(g, Workstation(false, ctoScreen), 1566, 405, 180);
+    cooScreen = new THREE.MeshLambertMaterial({ color: "#1d2733", emissive: "#000000", emissiveIntensity: 0.9 });
+    put(g, Workstation(false, cooScreen), 1725, 405, 180); put(g, Plant(0.8), 1505, 320); put(g, Plant(0.8), 1790, 320);
     // ^ Ruang COO desk (1725, 405) = Hawa's working seat (OfficeScene3D SEATS.default)
     // Ruang CTO desk lamp + its single PointLight (off by default; OfficeScene3D ctoFX drives intensity only)
     ctoLampGroup = G();
@@ -1057,6 +1062,14 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     ctoLight = new THREE.PointLight("#ffd98a", 0, 2.5, 1.5);
     ctoLight.position.set(wx(1544), FT + 0.92, wz(408));
     g.add(ctoLight);
+    // Ruang COO desk lamp + its single PointLight (mirror of CTO, 22px west of desk centre; OfficeScene3D ctoFX drives intensity only)
+    cooLampGroup = G();
+    bx(cooLampGroup, 0.08, 0.18, 0.08, "#c9a46a", 0, 0, 0);
+    bx(cooLampGroup, 0.1, 0.03, 0.1, "#fff1cf", 0, 0.18, 0, false);
+    put(g, cooLampGroup, 1703, 408, 0, FT + 0.72);
+    cooLight = new THREE.PointLight("#ffd98a", 0, 2.5, 1.5);
+    cooLight.position.set(wx(1703), FT + 0.92, wz(408));
+    g.add(cooLight);
     // Agent pods
     const pods = [[760, 690], [980, 690], [1200, 690], [760, 900], [980, 900], [1200, 900]];
     pods.forEach((p) => {
@@ -1604,6 +1617,7 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
   return {
     floors, site, yTarget, deskScreens, cornerLamps, labels,
     ctoDesk: { screen: ctoScreen, lamp: ctoLampGroup, light: ctoLight },
+    cooDesk: { screen: cooScreen, lamp: cooLampGroup, light: cooLight },
     get mode() { return mode; },
     get night() { return nightOn; },
     get style() { return styleNo; },
