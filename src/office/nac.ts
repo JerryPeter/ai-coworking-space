@@ -8,8 +8,8 @@
 //   - size: 0.85x the agent model
 // The receptionist (Lantai 1 lobby desk) is a NAC too: female, navy blazer, seated with a light idle (turn / nod).
 //
-// Layout (floor-plan px, see townhall.ts wx/wz): 20 NACs + receptionist
-//   Lantai 1 Ruang Kerja 5 · Lantai 2 Area Kerja Agen (orbs) 4 · Lobby 4 · outside 4 · corridors/stairs 3
+// Layout (floor-plan px, see townhall.ts wx/wz): 25 NACs + receptionist
+//   Lantai 1 Ruang Kerja 5 · Lantai 2 Area Kerja Agen (orbs) 4 · Lobby 4 · outside 9 · corridors/stairs 3
 // Paths are short straight lanes inside open floor area (no wall crossings); walkers pace slowly and pause at the ends.
 import * as THREE from "three";
 import { FT, wx, wz, type TownHall } from "./townhall";
@@ -24,7 +24,7 @@ const RECEPTION = { blazer: "#003366", shirt: "#ffffff", skirt: "#1f2a3a", hair:
 type Face = "N" | "S" | "E" | "W";
 const FACE: Record<Face, number> = { N: Math.PI, S: 0, E: Math.PI / 2, W: -Math.PI / 2 };
 
-interface NacSpec { where: 0 | 1 | 2; a: [number, number]; b?: [number, number]; face?: Face; y?: number; long?: boolean }
+interface NacSpec { where: 0 | 1 | 2; a: [number, number]; b?: [number, number]; face?: Face; y?: number; long?: boolean; sit?: boolean }
 
 /** 0 = outdoor site group, 1/2 = floor group. y defaults to FT (slab top) inside, 0 outside. */
 const SPECS: NacSpec[] = [
@@ -53,6 +53,12 @@ const SPECS: NacSpec[] = [
   { where: 1, a: [1175, 1100], b: [1175, 1540] },
   { where: 1, a: [1240, 1275], face: "N" },           // at the foot of the stairs
   { where: 2, a: [1225, 1110], b: [1225, 1620], long: true },
+  // Behind the building (north strip): 2 slow walkers, 2 idle standers, 1 sitting on a crate
+  { where: 0, a: [700, 250], b: [950, 250], y: 0.04 },
+  { where: 0, a: [1300, 230], b: [1550, 230], y: 0.04 },
+  { where: 0, a: [1190, 180], face: "S", y: 0.04 },
+  { where: 0, a: [1700, 250], face: "W", y: 0.04 },
+  { where: 0, a: [850, 210], y: 0.04, sit: true },
 ];
 
 interface Nac {
@@ -116,6 +122,13 @@ export function createNACs(th: TownHall): NacCrowd {
     const n: Nac = { ...m, toB: true, pause: (i % 5) * 0.7, speed: 0.45 + ((i * 37) % 20) / 100, ph: i * 1.7, baseRot: FACE[s.face || "S"] };
     if (s.b) { n.a = new THREE.Vector2(wx(s.a[0]), wz(s.a[1])); n.b = new THREE.Vector2(wx(s.b[0]), wz(s.b[1])); n.baseRot = Math.atan2(n.b.x - n.a.x, n.b.y - n.a.y); }
     m.root.rotation.y = n.baseRot;
+    if (s.sit) {
+      const SEAT = 0.42; // crate top (lower than the receptionist's 0.62 chair)
+      m.body.position.y = SEAT - 0.45 * NAC_SCALE;
+      m.legL.rotation.x = m.legR.rotation.x = -Math.PI / 2;
+      n.seated = true;
+      box(th.site, 0.5, 0.45, 0.5, wx(s.a[0]), s.y ?? 0.04, wz(s.a[1]), "#8a6a43");
+    }
     nacs.push(n);
   });
 
