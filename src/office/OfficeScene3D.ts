@@ -22,6 +22,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { createTownHall, FT, LH, S as PXS, wx, wz, type FloorMode, type Scope, type StyleNo, type TownHall, type Weather } from "./townhall";
 import type { TimeOfDay } from "./palettes";
+import { createNACs, type NacCrowd } from "./nac";
 
 export type { TimeOfDay, FloorMode, Scope, StyleNo, Weather };
 /** Floor selector value: 1-3 = one floor, 4 = roof, "all" = whole building, "x" = floors split vertically. */
@@ -331,6 +332,7 @@ export class OfficeScene3D {
   private camera = new THREE.PerspectiveCamera(38, 1, 0.1, 600);
   private controls: OrbitControls;
   private th: TownHall;
+  private nacs: NacCrowd;
   private spots: Spot[] = [];
   private G: Record<FloorNo, Record<string, GNode>> = { 1: {}, 2: {}, 3: {} };
   private mats = new Map<string, THREE.MeshLambertMaterial>();
@@ -403,6 +405,7 @@ export class OfficeScene3D {
     this.controls.addEventListener("start", this.onControlsStart);
 
     this.th = createTownHall(this.scene, this.renderer.capabilities.maxTextureSize >= 4096 ? 4096 : 2048);
+    this.nacs = createNACs(this.th); // background NACs + receptionist (scenery, not selectable)
     this.buildGraph();
 
     // The old left-hand room panel is gone (merged into the roster as a tab): drop its stale preference once.
@@ -1514,6 +1517,7 @@ export class OfficeScene3D {
     this.elapsed += dt;
     const t = this.elapsed;
     this.th.update(this.reduce ? 0 : dt, t, this.controls.target);
+    this.nacs.update(this.reduce ? 0 : dt, t);
     if (this.reduce) for (const n of [1, 2, 3, 4] as const) this.th.floors[n].position.y = this.th.yTarget[n];
     if (this.tween) {
       const tw = this.tween; tw.k = Math.min(1, tw.k + dt / tw.dur);

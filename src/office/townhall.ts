@@ -47,6 +47,8 @@ export const LAMP = { light: 0xffd580, dayI: 0.0, nightI: 0.9, dist: 6, decay: 1
 export interface THLabel { obj: CSS2DObject; floor: number; kind: "room" | "site" }
 export interface TownHall {
   floors: Record<1 | 2 | 3 | 4, THREE.Group>;
+  /** Outdoor site group (grass, parking, sidewalk); hidden when scope = "building". */
+  site: THREE.Group;
   /** Target y of each floor group (animated towards by update()). */
   yTarget: Record<number, number>;
   /** Screen materials of the 13 tracked Lantai 1 desks (0-4 west row, 5-10 east row, 11-12 manager rooms). */
@@ -433,6 +435,54 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     const v = VoxelPerson({ sit: opt.sit, hat: ["none", "whitecap", "beret", "none", "navycap"][k % 5], shirt: ["#ffffff", "#3b5bd9", "#9fc0f5", "#1f2f6b", "#e6eefb"][k % 5], vi: k });
     const w = SoftPerson({ sit: opt.sit, i: k * 3 + 5 }); v.visible = styleNo === 2; w.visible = styleNo === 3; p.visible = styleNo === 1;
     c.add(p, v, w); styleSwap.push([p, v, w]); c.userData.parts = [p, v, w]; return c;
+  }
+  // Satpam (security guard) per user reference: cream short-sleeve shirt with two chest pockets and epaulets,
+  // gold shield badge on the left chest, dark-brown trousers, black belt + boots, navy cap. Faces -z like Person.
+  const SATPAM = { shirt: "#EDE8C8", shirtD: "#D9D2AE", badge: "#FFD700", pants: "#3D1F0D", belt: "#111111", boots: "#111111", cap: "#1A237E" };
+  let badgeGeo: THREE.ShapeGeometry | null = null;
+  function shieldGeo() {
+    if (badgeGeo) return badgeGeo;
+    const s = new THREE.Shape(); // ~0.09 x 0.11 m shield, point down
+    s.moveTo(-0.045, 0.055); s.lineTo(0.045, 0.055); s.lineTo(0.045, 0.0); s.quadraticCurveTo(0.04, -0.035, 0, -0.055); s.quadraticCurveTo(-0.04, -0.035, -0.045, 0.0); s.closePath();
+    badgeGeo = new THREE.ShapeGeometry(s); return badgeGeo;
+  }
+  function Satpam() {
+    const o = G(); const U = SATPAM;
+    const legs: THREE.Group[] = [], arms: THREE.Group[] = [];
+    for (const s of [-1, 1]) {
+      const lp = G(); lp.position.set(s * 0.1, 0.8, 0); o.add(lp);
+      bx(lp, 0.15, 0.68, 0.16, U.pants, 0, -0.68, 0);                 // trouser leg
+      bx(lp, 0.17, 0.16, 0.19, U.boots, 0, -0.8, -0.01, false);         // boot shaft
+      bx(lp, 0.17, 0.07, 0.25, U.boots, 0, -0.8, -0.04, false);         // boot sole/toe
+      legs.push(lp);
+    }
+    bx(o, 0.44, 0.6, 0.26, U.shirt, 0, 0.8, 0);                         // shirt torso (tucked in)
+    bx(o, 0.45, 0.07, 0.27, U.belt, 0, 0.8, 0, false);                  // black belt
+    bx(o, 0.07, 0.05, 0.01, "#c9ccd2", 0, 0.81, -0.14, false);          // buckle
+    bx(o, 0.012, 0.5, 0.005, U.shirtD, 0, 0.87, -0.133, false);         // button placket
+    for (const s of [-1, 1]) {
+      bx(o, 0.12, 0.12, 0.012, U.shirtD, s * 0.11, 1.1, -0.136, false); // chest pocket
+      bx(o, 0.13, 0.035, 0.016, U.shirtD, s * 0.11, 1.215, -0.138, false); // pocket flap
+      bx(o, 0.13, 0.03, 0.2, U.shirtD, s * 0.17, 1.4, 0, false);        // epaulet
+      bx(o, 0.02, 0.032, 0.02, U.badge, s * 0.17, 1.405, -0.08, false); // epaulet button
+    }
+    const badge = new THREE.Mesh(shieldGeo(), mat(U.badge, { side: THREE.DoubleSide, emissive: "#5a4500" }));
+    badge.position.set(-0.11, 1.3, -0.146); badge.rotation.y = Math.PI; o.add(badge); // left chest (wearer's left = -x when facing -z)
+    for (const s of [-1, 1]) {
+      const ap = G(); ap.position.set(s * 0.29, 1.38, 0); o.add(ap);
+      bx(ap, 0.13, 0.22, 0.15, U.shirt, 0, -0.22, 0, false);            // short sleeve
+      bx(ap, 0.1, 0.36, 0.11, C.skin, 0, -0.58, 0, false);              // bare forearm
+      bx(ap, 0.11, 0.1, 0.11, C.skin, 0, -0.66, 0, false);              // hand
+      arms.push(ap);
+    }
+    o.userData.legs = legs; o.userData.arms = arms;
+    bx(o, 0.3, 0.32, 0.3, C.skin, 0, 1.4, 0);                           // head
+    bx(o, 0.31, 0.06, 0.31, "#1b1b1b", 0, 1.64, 0.005, false);          // short hair under the cap
+    for (const s of [-1, 1]) bx(o, 0.05, 0.05, 0.01, "#1d1d1d", s * 0.07, 1.57, -0.152, false);
+    bx(o, 0.33, 0.12, 0.33, U.cap, 0, 1.68, 0.005);                     // navy cap crown
+    bx(o, 0.29, 0.025, 0.14, U.cap, 0, 1.68, -0.21, false);             // peak
+    bx(o, 0.07, 0.06, 0.01, U.badge, 0, 1.71, -0.167, false);           // cap badge
+    return o;
   }
   // Dotted world map screen (Style 2)
   function mapCanvas() {
@@ -1406,8 +1456,8 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       const wl: THREE.Mesh[] = []; const v = kind === "bus" ? BusTJ(col as "blue" | "orange", wl) : Car(col, wl); const dir = ly === 2385 ? 1 : -1;
       add(g, v, wx(sx), wz(ly), dir > 0 ? -90 : 90, 0.03); vehicles.push({ p: v, dir, speed: LANE_SPEED[ly], wheels: wl, r: kind === "bus" ? 0.5 : 0.34 });
     });
-    // guard & clouds
-    const c = Folk({ shirt: "#2a3b55", pants: "#222" }); put(g, c, 1150, 1880, 180, 0);
+    // guard & clouds (satpam uniform, same model in every style)
+    put(g, Satpam(), 1150, 1880, 180, 0);
     for (let i = 0; i < 26; i++) { const cl = Cloud(); cl.position.set(-110 + rnd() * 220, 22 + rnd() * 26, -120 + rnd() * 190); cl.scale.setScalar(0.7 + rnd() * 1.1); cl.rotation.y = rnd() * 6; scene.add(cl); clouds.push(cl); }
     roomLabel(g, "Area Parkir Mobil", 1600, 1400, 1.6); roomLabel(g, "Parkir Motor", 285, 1520, 1.6);
     roomLabel(g, "Area Parkir", 700, 1880, 1.2);
@@ -1539,7 +1589,7 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
   setMode("all"); setNight(false);
 
   return {
-    floors, yTarget, deskScreens, cornerLamps, labels,
+    floors, site, yTarget, deskScreens, cornerLamps, labels,
     get mode() { return mode; },
     get night() { return nightOn; },
     get style() { return styleNo; },
