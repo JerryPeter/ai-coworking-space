@@ -1,37 +1,20 @@
 // Agents roster (spec 6.2): Hermes → tool card → OpenClaw; each group sorted by status, then name (t_f8e0064a).
-import { useEffect, useState, type ReactNode } from "react";
+// No filter UI: every agent is always listed (filters removed on request from Hawa).
+import type { ReactNode } from "react";
 import { endpoints, refetch, useApi } from "../api/client";
 import type { OpenClawAgent } from "../api/types";
 import { AgentCard, OpenClawCard, ToolCard } from "../components/agents/AgentCard";
-import { EmptyState, ErrorPanel, Skeleton } from "../components/ui/States";
+import { ErrorPanel, Skeleton } from "../components/ui/States";
 import { usePageSubtitle } from "../lib/subtitle";
 import { hermesStatus, openclawStatus, STATUS_RANK, useTeam, type AgentStatus, type TeamMember } from "../lib/team";
 import { useNow } from "../lib/time";
 
 type Framework = "hermes" | "openclaw";
-type PlatformFilter = "all" | Framework;
-type StatusFilter = "all" | "working" | "idle" | "offline";
-interface Filters { platform: PlatformFilter; status: StatusFilter }
 
-const FILTER_KEY = "mc.agents.filter";
-const PLATFORMS: [PlatformFilter, string][] = [["all", "Semua"], ["hermes", "Hermes"], ["openclaw", "OpenClaw"]];
-const STATUSES: [StatusFilter, string][] = [["all", "Semua"], ["working", "Working"], ["idle", "Idle"], ["offline", "Offline"]];
-const DEFAULTS: Filters = { platform: "all", status: "all" };
-
-function readFilters(): Filters {
-  try {
-    const v = JSON.parse(sessionStorage.getItem(FILTER_KEY) || "{}");
-    return {
-      platform: PLATFORMS.some(([k]) => k === v.platform) ? v.platform : "all",
-      status: STATUSES.some(([k]) => k === v.status) ? v.status : "all",
-    };
-  } catch { return DEFAULTS; }
-}
-
-/** One sortable/filterable row. */
+/** One sortable row. */
 interface Row { key: string; fw: Framework; status: AgentStatus; name: string; m?: TeamMember; a?: OpenClawAgent }
 
-const statusOk = (f: StatusFilter, s: AgentStatus) => f === "all" || f === s || (f === "offline" && s === "error");
+// Default order: working → idle → offline, then A-Z.
 const byStatusName = (x: Row, y: Row) => STATUS_RANK[x.status] - STATUS_RANK[y.status] || x.name.localeCompare(y.name);
 
 // Framework badge, overlaid on the card's top-right edge so the card component itself stays untouched.
@@ -47,90 +30,48 @@ function WithFramework({ fw, children }: { fw: Framework; children: ReactNode })
 export default function Agents() {
   const team = useTeam();
   const now = useNow(10_000);
-  const [f, setF] = useState<Filters>(readFilters);
   const oc = useApi(endpoints.openclaw, 30_000);
   const n = team.members.length;
   usePageSubtitle(team.agents.data ? `· ${n} agent${n === 1 ? "" : "s"} · 1 tool` : null);
 
-  useEffect(() => {
-    try { sessionStorage.setItem(FILTER_KEY, JSON.stringify(f)); } catch { /* storage unavailable */ }
-  }, [f]);
-  const set = (p: Partial<Filters>) => setF((cur) => ({ ...cur, ...p }));
-
-  const hermesRows: Row[] = team.members.map((m) => ({
+  const hermes: Row[] = team.members.map((m): Row => ({
     key: m.id, fw: "hermes", status: hermesStatus(m, now), name: m.ident.displayName, m,
-  }));
-  const ocRows: Row[] = (oc.data?.agents ?? []).map((a) => ({
+  })).sort(byStatusName);
+  const openclaw: Row[] = (oc.data?.agents ?? []).map((a): Row => ({
     key: a.name, fw: "openclaw", status: openclawStatus(a), name: a.display_name || a.name, a,
-  }));
-  const all = [...hermesRows, ...ocRows];
-  const match = (r: Row, x: Filters) => (x.platform === "all" || x.platform === r.fw) && statusOk(x.status, r.status);
-  const count = (p: Partial<Filters>) => all.filter((r) => match(r, { ...f, ...p })).length;
-  const hermes = hermesRows.filter((r) => match(r, f)).sort(byStatusName);
-  const openclaw = ocRows.filter((r) => match(r, f)).sort(byStatusName);
-
-  const showHermes = f.platform !== "openclaw";
-  const showOc = f.platform !== "hermes";
-  const showTool = showHermes && f.status === "all";
-  const filtered = f.platform !== "all" || f.status !== "all";
+  })).sort(byStatusName);
   const hermesLoading = team.loading && !n;
-  // Loading or failed sections keep their skeleton/error panel instead of the "no match" empty state.
-  const hermesBusy = showHermes && (hermesLoading || (!!team.error && !n));
-  const ocBusy = showOc && !oc.data;
-  const nothing = filtered && !hermesBusy && !ocBusy && !hermes.length && !openclaw.length && !showTool;
-
-  const btn = (active: boolean, label: string, c: number, onClick: () => void, key: string) => (
-    <button key={key} type="button" className={`team-filter-btn${active ? " active" : ""}`} aria-pressed={active} onClick={onClick}>
-      {label} <span className="filter-count">({c})</span>
-    </button>
-  );
 
   return (
     <>
       <div className="page-head">
         <span className="sm secondary">Status comes from gateway.lock + kanban claims (office state). Click a card for details.</span>
       </div>
-      <div className="agents-filters">
-        <div className="team-filter-bar" role="group" aria-label="Platform">
-          {PLATFORMS.map(([k, l]) => btn(f.platform === k, l, count({ platform: k }), () => set({ platform: k }), k))}
-        </div>
-        <div className="team-filter-bar" role="group" aria-label="Status">
-          {STATUSES.map(([k, l]) => btn(f.status === k, l, count({ status: k }), () => set({ status: k }), k))}
-        </div>
-      </div>
-      {nothing ? (
-        <div className="card"><EmptyState title="Tidak ada agent yang sesuai filter." /></div>
+      {team.error && !n ? (
+        <ErrorPanel what="agents" error={team.error} onRetry={() => { void refetch(endpoints.agents); void refetch(endpoints.office); }} />
       ) : (
-        <>
-          {showHermes && (team.error && !n ? (
-            <ErrorPanel what="agents" error={team.error} onRetry={() => { void refetch(endpoints.agents); void refetch(endpoints.office); }} />
-          ) : (hermes.length > 0 || showTool || hermesLoading) && (
-            <div className="agent-grid">
-              {hermesLoading
-                ? [0, 1, 2, 3].map((i) => <Skeleton key={i} h={232} r={12} />)
-                : hermes.map((r) => <WithFramework key={r.key} fw="hermes"><AgentCard m={r.m!} now={now} /></WithFramework>)}
-              {showTool && <WithFramework fw="hermes"><ToolCard tool={team.tool} loading={team.tools.loading} now={now} /></WithFramework>}
-            </div>
-          ))}
-          {showOc && (
-            <section className="openclaw-team" aria-label="OpenClaw Team" style={{ marginTop: showHermes ? "var(--space-6)" : 0 }}>
-              {showHermes && <hr style={{ border: 0, borderTop: "1px solid var(--border-default)", margin: "0 0 var(--space-4)" }} />}
-              <h2 style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: 600 }}>OpenClaw Team</h2>
-              <div className="xs muted" style={{ margin: "4px 0 var(--space-4)" }}>Data source: OpenClaw (read-only)</div>
-              {oc.error && !oc.data ? (
-                <ErrorPanel what="OpenClaw agents" error={oc.error} onRetry={() => void refetch(endpoints.openclaw)} />
-              ) : !oc.data ? (
-                <div className="agent-grid">{[0, 1, 2, 3].map((i) => <Skeleton key={i} h={232} r={12} />)}</div>
-              ) : openclaw.length ? (
-                <div className="agent-grid">
-                  {openclaw.map((r) => <WithFramework key={r.key} fw="openclaw"><OpenClawCard a={r.a!} now={now} /></WithFramework>)}
-                </div>
-              ) : filtered && <div className="sm muted">Tidak ada agent OpenClaw yang sesuai filter.</div>}
-              {oc.data && !oc.data.available && <div className="sm muted">OpenClaw config unavailable: {oc.data.error}</div>}
-            </section>
-          )}
-        </>
+        <div className="agent-grid">
+          {hermesLoading
+            ? [0, 1, 2, 3].map((i) => <Skeleton key={i} h={232} r={12} />)
+            : hermes.map((r) => <WithFramework key={r.key} fw="hermes"><AgentCard m={r.m!} now={now} /></WithFramework>)}
+          <WithFramework fw="hermes"><ToolCard tool={team.tool} loading={team.tools.loading} now={now} /></WithFramework>
+        </div>
       )}
+      <section className="openclaw-team" aria-label="OpenClaw Team" style={{ marginTop: "var(--space-6)" }}>
+        <hr style={{ border: 0, borderTop: "1px solid var(--border-default)", margin: "0 0 var(--space-4)" }} />
+        <h2 style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: 600 }}>OpenClaw Team</h2>
+        <div className="xs muted" style={{ margin: "4px 0 var(--space-4)" }}>Data source: OpenClaw (read-only)</div>
+        {oc.error && !oc.data ? (
+          <ErrorPanel what="OpenClaw agents" error={oc.error} onRetry={() => void refetch(endpoints.openclaw)} />
+        ) : !oc.data ? (
+          <div className="agent-grid">{[0, 1, 2, 3].map((i) => <Skeleton key={i} h={232} r={12} />)}</div>
+        ) : openclaw.length > 0 && (
+          <div className="agent-grid">
+            {openclaw.map((r) => <WithFramework key={r.key} fw="openclaw"><OpenClawCard a={r.a!} now={now} /></WithFramework>)}
+          </div>
+        )}
+        {oc.data && !oc.data.available && <div className="sm muted">OpenClaw config unavailable: {oc.data.error}</div>}
+      </section>
     </>
   );
 }

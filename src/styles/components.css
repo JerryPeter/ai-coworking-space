@@ -676,11 +676,6 @@ table.simple td { padding: 8px; border-bottom: 1px solid var(--border-subtle); }
 .o3d-name > .truncate { min-width: 0; }
 .o3d-fw { flex: none; font-size: 10px; font-weight: 700; line-height: 14px; padding: 1px 5px; border-radius: 4px; }
 
-/* Agents filters (t_f8e0064a) */
-.agents-filters { margin-bottom: var(--space-2); }
-.agents-filters .team-filter-bar { margin-bottom: var(--space-2); }
-.filter-count { font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
-
 /* Workflow (t_b9f7d656, t_5115c601): animated node diagram, design spec by Bulma.
    Each node sets --wf-c / --wf-c-subtle to its agent color vars; arrows are an SVG overlay per stage gap. */
 .wf-title { margin: 0; font-size: var(--text-2xl); line-height: var(--lh-2xl); font-weight: 700; }
