@@ -8,8 +8,9 @@
 //   - size: 0.85x the agent model
 // The receptionist (Lantai 1 lobby desk) is a NAC too: female, navy blazer, seated with a light idle (turn / nod).
 //
-// Layout (floor-plan px, see townhall.ts wx/wz): 25 NACs + receptionist
-//   Lantai 1 Ruang Kerja 5 · Lantai 2 Area Kerja Agen (orbs) 4 · Lobby 4 · outside 9 · corridors/stairs 3
+// Layout (floor-plan px, see townhall.ts wx/wz): 34 NACs + receptionist
+//   Lantai 1 Ruang Kerja 5 · Lantai 2 Area Kerja Agen (orbs) 4 + Area Kolaborasi/Training/Library/Coffee 5
+//   Lobby 4 · outside 9 · corridors/stairs 3 · Lantai 3 4
 // Paths are short straight lanes inside open floor area (no wall crossings); walkers pace slowly and pause at the ends.
 import * as THREE from "three";
 import { FT, wx, wz, type TownHall } from "./townhall";
@@ -24,9 +25,9 @@ const RECEPTION = { blazer: "#003366", shirt: "#ffffff", skirt: "#1f2a3a", hair:
 type Face = "N" | "S" | "E" | "W";
 const FACE: Record<Face, number> = { N: Math.PI, S: 0, E: Math.PI / 2, W: -Math.PI / 2 };
 
-interface NacSpec { where: 0 | 1 | 2; a: [number, number]; b?: [number, number]; face?: Face; y?: number; long?: boolean; sit?: boolean }
+interface NacSpec { where: 0 | 1 | 2 | 3; a: [number, number]; b?: [number, number]; face?: Face; y?: number; long?: boolean; sit?: boolean }
 
-/** 0 = outdoor site group, 1/2 = floor group. y defaults to FT (slab top) inside, 0 outside. */
+/** 0 = outdoor site group, 1/2/3 = floor group. y defaults to FT (slab top) inside, 0 outside. */
 const SPECS: NacSpec[] = [
   // Lantai 1 - Ruang Kerja (desk rows at x 1566 / 1788)
   { where: 1, a: [1650, 360], b: [1650, 760] },
@@ -59,6 +60,17 @@ const SPECS: NacSpec[] = [
   { where: 0, a: [1190, 180], face: "S", y: 0.04 },
   { where: 0, a: [1700, 250], face: "W", y: 0.04 },
   { where: 0, a: [850, 210], y: 0.04, sit: true },
+  // Lantai 2: 5 more NAC around the collaboration/training/library/coffee areas (keep clear of CTO/COO + orbs)
+  { where: 2, a: [1480, 560], b: [1480, 700] },
+  { where: 2, a: [1650, 540], face: "S" },            // facing the collaboration table
+  { where: 2, a: [1480, 1010], b: [1700, 1010], long: true },
+  { where: 2, a: [520, 1160], b: [850, 1160] },
+  { where: 2, a: [700, 1600], face: "S" },            // Coffee Corner
+  // Lantai 3: 4 NAC (avoid the break spots: Tempat Istirahat, Ruang Game)
+  { where: 3, a: [620, 650], b: [620, 860] },
+  { where: 3, a: [1100, 372], face: "S" },            // on the Balkon
+  { where: 3, a: [1650, 650], b: [1650, 760], long: true },
+  { where: 3, a: [1150, 1460], face: "N" },           // Koridor
 ];
 
 interface Nac {
@@ -112,7 +124,7 @@ export function createNACs(th: TownHall): NacCrowd {
     return { root, body, head, legL, legR, armL, armR };
   }
 
-  const parentOf = (w: 0 | 1 | 2) => (w === 0 ? th.site : th.floors[w]);
+  const parentOf = (w: 0 | 1 | 2 | 3) => (w === 0 ? th.site : th.floors[w]);
   const nacs: Nac[] = [];
   SPECS.forEach((s, i) => {
     const m = build({ shirt: GREYS[i % GREYS.length], pants: NAC_PANTS, skin: SKINS[(i * 7) % SKINS.length], hair: HAIRS[i % HAIRS.length], long: s.long });
