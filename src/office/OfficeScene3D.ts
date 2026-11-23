@@ -442,7 +442,7 @@ export class OfficeScene3D {
     if (meta.reason !== undefined) d.reason = meta.reason ?? "";
     if (meta.color && meta.color !== d.color) {
       d.color = meta.color;
-      const dim = !!a.dimmed; this.setDim(a, false); a.shirt.color.set(meta.color); this.setDim(a, dim);
+      const dim = !!a.dimmed; this.setDim(a, false); if (d.id !== "beerus_digital_lead") a.shirt.color.set(meta.color); this.setDim(a, dim);
       changed = true;
     }
     if (STATUS[status] && status !== prev) {
@@ -709,6 +709,7 @@ export class OfficeScene3D {
   private buildAgent(d: AgentData, deskIdx: number): Agent3D {
     if (d.id === CLAUDE_AGENT_ID) return this.buildOrb(d, deskIdx);
     if (d.id === OPENCODE_AGENT_ID) return this.buildTerminal(d, deskIdx);
+    if (d.id === "beerus_digital_lead") return this.buildBeerus(d, deskIdx);
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
     const sm = new THREE.MeshLambertMaterial({ color: d.color }), skin = SKINS[deskIdx % SKINS.length], hair = HAIRS[(deskIdx * 5 + 2) % HAIRS.length];
     this.box(body, 0.44, 0.48, 0.26, 0, 0.45, 0, sm);
@@ -737,6 +738,84 @@ export class OfficeScene3D {
     const a: Agent3D = {
       data: d, group: g, body, lightMat, shirt: sm, legL, legR, armL, armR, book, hit, ring, tag, zzz: z.sp,
       // "?" = unknown state (the API could not tell what the agent is doing)
+      dots: bubble("…", "rgba(255,255,255,.95)", "#f2a91e"), excl: bubble("?", "#ef4b4b", "#ffffff"),
+      spot: null, path: [], floor: 1, lastNode: "lob", pose: "stand", atSpot: false, deskIdx, since: null, phase: Math.random() * 6,
+    };
+    hit.userData.agent = a;
+    this.drawTag(a);
+    return a;
+  }
+
+  /** Beerus: bald purple-skinned voxel figure with tiered ears, tail, black vest, cyan baggy pants. */
+  private buildBeerus(d: AgentData, deskIdx: number): Agent3D {
+    const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
+    // Black vest: deliberately not d.color (guarded in setAgentState()).
+    const sm = new THREE.MeshLambertMaterial({ color: "#1A1A1A" });
+    this.box(body, 0.44, 0.48, 0.26, 0, 0.45, 0, sm);
+    const diamond = this.box(body, 0.12, 0.12, 0.015, 0, 0.60, 0.135, "#FF6B00");
+    diamond.rotation.z = Math.PI / 4;
+    // purple sash + diagonal strap
+    this.box(body, 0.46, 0.07, 0.27, 0, 0.34, 0, "#6A0DAD");
+    const strap = this.box(body, 0.05, 0.42, 0.02, 0.1, 0.55, 0.14, "#6A0DAD");
+    strap.rotation.z = 0.5;
+    // bald purple head
+    this.box(body, 0.36, 0.34, 0.34, 0, 0.95, 0, "#9B72CF");
+    // ears: 3 tapering tiers per side
+    for (const s of [-1, 1]) {
+      const t1 = this.box(body, 0.08, 0.16, 0.03, s * 0.21, 1.05, -0.02, "#9B72CF"); t1.rotation.z = -s * 0.35;
+      const t2 = this.box(body, 0.06, 0.12, 0.025, s * 0.28, 1.17, -0.03, "#9B72CF"); t2.rotation.z = -s * 0.5;
+      const t3 = this.box(body, 0.04, 0.08, 0.02, s * 0.33, 1.27, -0.035, "#9B72CF"); t3.rotation.z = -s * 0.6;
+    }
+    // solid yellow eyes, no dark socket
+    for (const s of [-1, 1]) this.box(body, 0.055, 0.075, 0.02, s * 0.08, 1.08, 0.172, "#FFD700");
+    this.box(body, 0.02, 0.1, 0.02, 0, 1.37, 0, C.metal);
+    const lightMat = new THREE.MeshBasicMaterial({ color: STATUS[d.status].color });
+    const lamp = new THREE.Mesh(this.geo("lamp", () => new THREE.IcosahedronGeometry(0.075, 0)), lightMat);
+    lamp.position.set(0, 1.52, 0); body.add(lamp);
+    // static tail: 5 tapering segments trailing behind and down
+    const tailSeg = (w: number, h: number, dp: number, y: number, z: number, rx: number) => {
+      const seg = this.box(body, w, h, dp, 0, y, z, "#9B72CF"); seg.rotation.x = rx; return seg;
+    };
+    tailSeg(0.12, 0.12, 0.14, 0.48, -0.17, 0.3);
+    tailSeg(0.10, 0.10, 0.13, 0.38, -0.32, 0.55);
+    tailSeg(0.08, 0.08, 0.12, 0.26, -0.46, 0.75);
+    tailSeg(0.06, 0.06, 0.10, 0.18, -0.58, 0.4);
+    tailSeg(0.045, 0.045, 0.08, 0.16, -0.68, 0.1);
+    const limb = (x: number, y: number, w: number, h: number, dp: number, c: Col) => {
+      const pv = new THREE.Group(); pv.position.set(x, y, 0); body.add(pv);
+      this.box(pv, w, h, dp, 0, -h, 0, c); return pv;
+    };
+    const legL = limb(-0.11, 0.45, 0.17, 0.45, 0.19, "#00BCD4");
+    const legR = limb(0.11, 0.45, 0.17, 0.45, 0.19, "#00BCD4");
+    // baggy flare just above the knee (body-space y 0.62 -> local y 0.17)
+    this.box(legL, 0.22, 0.16, 0.22, 0, 0.17, 0, "#00BCD4");
+    this.box(legR, 0.22, 0.16, 0.22, 0, 0.17, 0, "#00BCD4");
+    // tan shoes (body-space y 0.02 -> local y -0.43)
+    this.box(legL, 0.18, 0.08, 0.22, 0, -0.43, -0.01, "#8B6914");
+    this.box(legR, 0.18, 0.08, 0.22, 0, -0.43, -0.01, "#8B6914");
+    const armL = limb(-0.29, 0.91, 0.13, 0.42, 0.15, "#9B72CF");
+    const armR = limb(0.29, 0.91, 0.13, 0.42, 0.15, "#9B72CF");
+    for (const pv of [armL, armR]) {
+      const wrist = new THREE.Mesh(this.geo("beerusBangle", () => new THREE.TorusGeometry(0.065, 0.012, 8, 16)), this.M("#FFD700"));
+      wrist.position.set(0, -0.36, 0); wrist.rotation.x = Math.PI / 2; wrist.castShadow = true; pv.add(wrist);
+      const upper = wrist.clone(); upper.position.set(0, -0.06, 0); pv.add(upper);
+    }
+    const book = this.box(body, 0.32, 0.03, 0.22, 0, 0.66, 0.36, 0xe9dfc6); book.visible = false;
+    const hit = this.box(g, 0.75, 1.65, 0.75, 0, 0, 0, this.HIT); hit.castShadow = false; hit.receiveShadow = false;
+    const ring = new THREE.Mesh(this.geo("ring", () => new THREE.RingGeometry(0.5, 0.64, 28)),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; ring.renderOrder = 5; g.add(ring);
+    const tag = this.makeTag(g, 2.0);
+    const z = this.textSprite(96, 64, 0.75, 0.5), zc = z.c.getContext("2d")!;
+    zc.font = "700 34px " + FONT; zc.fillStyle = "#ffffff"; zc.strokeStyle = "rgba(30,40,60,.85)"; zc.lineWidth = 5;
+    zc.strokeText("z z z", 6, 42); zc.fillText("z z z", 6, 42); z.tex.needsUpdate = true; z.sp.visible = false; g.add(z.sp);
+    const bubble = (txt: string, bg: string, fg: string) => {
+      const b = this.textSprite(96, 96, 0.5, 0.5), c = b.c.getContext("2d")!;
+      c.fillStyle = bg; rr(c, 8, 8, 80, 80, 40); c.fill(); c.fillStyle = fg; c.font = "700 50px " + FONT; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(txt, 48, 52);
+      b.tex.needsUpdate = true; b.sp.position.set(0.45, 2.45, 0); b.sp.visible = false; g.add(b.sp); return b.sp;
+    };
+    const a: Agent3D = {
+      data: d, group: g, body, lightMat, shirt: sm, legL, legR, armL, armR, book, hit, ring, tag, zzz: z.sp,
       dots: bubble("…", "rgba(255,255,255,.95)", "#f2a91e"), excl: bubble("?", "#ef4b4b", "#ffffff"),
       spot: null, path: [], floor: 1, lastNode: "lob", pose: "stand", atSpot: false, deskIdx, since: null, phase: Math.random() * 6,
     };
