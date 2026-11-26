@@ -585,39 +585,11 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text-primar
 @media (max-width: 780px) {
   .roster-tabs { margin: 6px 8px 0; }
 }
-/* ---- "Agen" tab filters (search + platform/status segmented), compact, built once above .o3d-list. */
-.o3d-filters { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 6px 10px 2px; }
-.o3d-search { position: relative; }
-.o3d-search input { width: 100%; height: 28px; padding: 0 26px 0 9px; border-radius: var(--radius-md); border: 1px solid var(--border-default); background: var(--bg-surface); color: inherit; font-size: var(--text-xs, 12px); outline: none; }
-.o3d-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
-.o3d-search input:focus-visible { border-color: var(--accent, var(--text-primary)); }
-.o3d-search-clear { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-secondary); font-size: 11px; line-height: 1; cursor: pointer; }
-.o3d-search-clear:hover { background: var(--bg-surface-hover); color: var(--text-primary); }
-.o3d-search-clear[hidden] { display: none; }
-.o3d-seg.segmented { display: flex; width: 100%; height: 28px; gap: 2px; }
-.o3d-seg.segmented button { flex: 1; min-width: 0; padding: 0 4px; border: 0; background: transparent; font-size: var(--text-xs, 12px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
-.o3d-seg.segmented button[aria-pressed="true"] { background: var(--bg-surface-hover); color: var(--text-primary); }
-.o3d-seg.segmented button:focus-visible { outline: 2px solid var(--accent, var(--text-primary)); outline-offset: -2px; }
 .o3d-list li.o3d-group { margin: 6px 10px 2px; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); }
 .o3d-list li.o3d-group:first-child { margin-top: 2px; }
-.o3d-list li.o3d-empty { padding: 18px 10px; text-align: center; color: var(--text-secondary); font-size: var(--text-xs, 12px); }
-.o3d-list li.o3d-empty p { margin: 0 0 8px; }
-.o3d-list button.o3d-reset { display: inline-block; width: auto; padding: 4px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: transparent; color: var(--text-primary); font-size: var(--text-xs, 12px); font-weight: 500; cursor: pointer; }
-.o3d-list button.o3d-reset:hover { background: var(--bg-surface-hover); }
-.office .o3d-search input { background: transparent; border-color: var(--line); color: var(--panel-fg); }
-.office .o3d-search input::placeholder, .office .o3d-search-clear { color: var(--panel-dim); }
-.office .o3d-seg.segmented { background: transparent; border-color: var(--line); }
-.office .o3d-seg.segmented button { color: var(--panel-dim); }
-.office .o3d-seg.segmented button:hover, .office .o3d-seg.segmented button[aria-pressed="true"] { color: var(--panel-fg); }
-.office .o3d-seg.segmented button[aria-pressed="true"], .office .o3d-search-clear:hover, .office .o3d-list button.o3d-reset:hover { background: var(--hover); }
-.office .o3d-list li.o3d-group, .office .o3d-list li.o3d-empty { color: var(--panel-dim); }
-.office .o3d-list button.o3d-reset { border-color: var(--line); color: var(--panel-fg); }
+.office .o3d-list li.o3d-group { color: var(--panel-dim); }
 @media (max-width: 780px) {
-  .o3d-filters { flex-direction: row; flex-wrap: wrap; padding: 6px 8px 0; }
-  .o3d-search { flex: 1 1 100%; }
-  .o3d-seg.segmented { flex: 1 1 0; width: auto; }
   .o3d-list li.o3d-group { display: none; }
-  .o3d-list li.o3d-empty { width: 100%; padding: 8px; }
 }
 .nametag { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: var(--radius-pill); background: rgba(26, 30, 40, 0.85); color: #E8EAF0; font-size: 12px; font-weight: 600; white-space: nowrap; pointer-events: none; transition: transform var(--dur-fast), opacity var(--dur-base); font-family: var(--font-sans); }
 .nametag.hover { transform: scale(1.05); }

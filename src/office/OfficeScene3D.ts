@@ -237,30 +237,8 @@ const ROSTER_TAB_KEY = "mc.office.rosterTab";
 function readRosterTab(): RosterTab {
   try { return localStorage.getItem(ROSTER_TAB_KEY) === "rooms" ? "rooms" : "agents"; } catch { return "agents"; }
 }
-/** "Agen" tab filters. Platform + status persist in localStorage; the name query does not. */
-type PlatformFilter = "all" | "hermes" | "openclaw";
-type StatusFilter = "all" | "active" | "working" | "idle";
 type PlatformGroup = "hermes" | "openclaw" | "tools";
-const ROSTER_FILTER_KEY = "mc.office.rosterFilter";
-const PLATFORM_FILTERS: [PlatformFilter, string][] = [["all", "Semua"], ["hermes", "Hermes"], ["openclaw", "OpenClaw"]];
-const STATUS_FILTERS: [StatusFilter, string][] = [["all", "Semua"], ["active", "Aktif"], ["working", "Working"], ["idle", "Idle"]];
 const GROUPS: [PlatformGroup, string][] = [["hermes", "Hermes"], ["openclaw", "OpenClaw"], ["tools", "Tools"]];
-function readRosterFilter(): { platform: PlatformFilter; status: StatusFilter } {
-  const out = { platform: "all" as PlatformFilter, status: "all" as StatusFilter };
-  try {
-    const v = JSON.parse(localStorage.getItem(ROSTER_FILTER_KEY) || "{}");
-    if (PLATFORM_FILTERS.some(([k]) => k === v.platform)) out.platform = v.platform;
-    if (STATUS_FILTERS.some(([k]) => k === v.status)) out.status = v.status;
-  } catch { /* storage unavailable / bad JSON */ }
-  return out;
-}
-/** Aktif = not offline/error; Working = working|meeting; Idle = idle|break|waiting. */
-function statusMatches(f: StatusFilter, s: AgentStatus): boolean {
-  if (f === "active") return s !== "offline" && s !== "error";
-  if (f === "working") return s === "working" || s === "meeting";
-  if (f === "idle") return s === "idle" || s === "break" || s === "waiting";
-  return true;
-}
 /** Room navigation shortcuts: label centres from townhall.ts roomLabel() (floor-plan px). Toilet/Gudang/Tangga left out. */
 interface RoomNav { name: string; icon: string; floor: 1 | 2; px: number; pz: number }
 const ROOMS: RoomNav[] = [
@@ -378,11 +356,6 @@ export class OfficeScene3D {
   // DOM: tab bar (Agen / Ruangan) inside the roster; room shortcut buttons indexed like ROOMS.
   private tabs!: Record<RosterTab, { btn: HTMLButtonElement; pane: HTMLElement }>;
   private rosterTab = readRosterTab();
-  private rosterFilter = readRosterFilter();
-  private rosterQuery = "";
-  private filterBtns: { platform: Map<PlatformFilter, HTMLButtonElement>; status: Map<StatusFilter, HTMLButtonElement> } = { platform: new Map(), status: new Map() };
-  private searchInput: HTMLInputElement | null = null;
-  private searchClear: HTMLButtonElement | null = null;
   private roomEntries: HTMLButtonElement[] = [];
   private activeRoom = -1;
 
@@ -1298,7 +1271,7 @@ export class OfficeScene3D {
       this.setRosterTab(k);
       this.tabs[k].btn.focus();
     });
-    this.tabs.agents.pane.append(this.buildRosterFilters(root.id), list, detail);
+    this.tabs.agents.pane.append(list, detail);
     this.tabs.rooms.pane.appendChild(this.buildRoomList(root.id));
     root.append(header, tablist, this.tabs.agents.pane, this.tabs.rooms.pane);
     this.applyRosterTab();
@@ -1340,76 +1313,9 @@ export class OfficeScene3D {
     if (a.terminal || a.orb || a.data.id === CLAUDE_AGENT_ID || a.data.id === OPENCODE_AGENT_ID) return "tools";
     return a.data.id.startsWith("openclaw:") ? "openclaw" : "hermes";
   }
-  private isFiltered() {
-    const f = this.rosterFilter;
-    return f.platform !== "all" || f.status !== "all" || this.rosterQuery.trim() !== "";
-  }
-  /** AND of platform, status and name/id substring (case-insensitive). */
-  private matchesFilter(a: Agent3D) {
-    const f = this.rosterFilter;
-    if (f.platform !== "all" && this.groupOf(a) !== f.platform) return false;
-    if (!statusMatches(f.status, a.data.status)) return false;
-    const q = this.rosterQuery.trim().toLowerCase();
-    return !q || a.data.name.toLowerCase().includes(q) || a.data.id.toLowerCase().includes(q);
-  }
-  /** Filter controls of the "Agen" tab. Built once: re-renders only rebuild the <ul>, so the search keeps focus/value. */
-  private buildRosterFilters(idBase: string) {
-    const box = el("div", "o3d-filters");
-    const search = el("div", "o3d-search");
-    const input = el("input");
-    input.type = "search"; input.placeholder = "Cari nama agent…"; input.id = idBase + "-q";
-    input.setAttribute("aria-label", "Cari agent berdasarkan nama"); input.autocomplete = "off"; input.spellcheck = false;
-    const clear = el("button", "o3d-search-clear", "✕");
-    clear.type = "button"; clear.title = "Kosongkan pencarian"; clear.setAttribute("aria-label", clear.title); clear.hidden = true;
-    input.addEventListener("input", () => { this.rosterQuery = input.value; clear.hidden = !input.value; this.renderRoster(); });
-    input.addEventListener("keydown", (e) => { if (e.key === "Escape" && input.value) { e.preventDefault(); e.stopPropagation(); this.setRosterQuery(""); } });
-    clear.addEventListener("click", () => { this.setRosterQuery(""); input.focus(); });
-    search.append(input, clear);
-    this.searchInput = input; this.searchClear = clear;
-    const mkSeg = <K extends string>(label: string, opts: [K, string][], map: Map<K, HTMLButtonElement>, pick: (k: K) => void) => {
-      const seg = el("div", "segmented o3d-seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", label);
-      opts.forEach(([k, text]) => {
-        const b = el("button", "", text); b.type = "button";
-        b.addEventListener("click", () => pick(k));
-        map.set(k, b); seg.appendChild(b);
-      });
-      return seg;
-    };
-    box.append(
-      search,
-      mkSeg("Filter platform", PLATFORM_FILTERS, this.filterBtns.platform, (k) => this.setRosterFilter({ platform: k })),
-      mkSeg("Filter status", STATUS_FILTERS, this.filterBtns.status, (k) => this.setRosterFilter({ status: k })),
-    );
-    this.applyFilterButtons();
-    return box;
-  }
-  private applyFilterButtons() {
-    this.filterBtns.platform.forEach((b, k) => b.setAttribute("aria-pressed", String(k === this.rosterFilter.platform)));
-    this.filterBtns.status.forEach((b, k) => b.setAttribute("aria-pressed", String(k === this.rosterFilter.status)));
-  }
-  private setRosterFilter(patch: Partial<{ platform: PlatformFilter; status: StatusFilter }>) {
-    this.rosterFilter = { ...this.rosterFilter, ...patch };
-    try { localStorage.setItem(ROSTER_FILTER_KEY, JSON.stringify(this.rosterFilter)); } catch { /* storage unavailable */ }
-    this.applyFilterButtons();
-    this.renderRoster();
-  }
-  private setRosterQuery(q: string) {
-    this.rosterQuery = q;
-    if (this.searchInput) this.searchInput.value = q;
-    if (this.searchClear) this.searchClear.hidden = !q;
-    this.renderRoster();
-  }
-  private resetRosterFilters() {
-    this.rosterQuery = "";
-    if (this.searchInput) this.searchInput.value = "";
-    if (this.searchClear) this.searchClear.hidden = true;
-    this.setRosterFilter({ platform: "all", status: "all" });
-  }
   private renderRoster() {
     const { title, tally, list } = this.ui;
-    // Title: "N agent", or "X dari N agent" while filtered. The tally below always counts every agent.
-    const shown = this.agents.filter((a) => this.matchesFilter(a));
-    title.textContent = this.isFiltered() ? shown.length + " dari " + this.agents.length + " agent" : this.agents.length + " agent";
+    title.textContent = this.agents.length + " agent";
     tally.textContent = "";
     const counts: Partial<Record<AgentStatus, number>> = {};
     this.agents.forEach((a) => { counts[a.data.status] = (counts[a.data.status] || 0) + 1; });
@@ -1420,14 +1326,9 @@ export class OfficeScene3D {
     });
     const keepY = list.scrollTop, keepX = list.scrollLeft;
     list.textContent = "";
-    if (!shown.length) {
-      const li = el("li", "o3d-empty"), reset = el("button", "o3d-reset", "Reset filter");
-      reset.type = "button"; reset.addEventListener("click", () => this.resetRosterFilters());
-      li.append(el("p", "", "Tidak ada agent yang cocok"), reset); list.appendChild(li);
-    }
     // Platform groups Hermes → OpenClaw → Tools; desk order inside each group, independent of fetch order.
     GROUPS.forEach(([g, label]) => {
-      const members = shown.filter((a) => this.groupOf(a) === g).sort((x, y) => x.deskIdx - y.deskIdx);
+      const members = this.agents.filter((a) => this.groupOf(a) === g).sort((x, y) => x.deskIdx - y.deskIdx);
       if (!members.length) return;
       const head = el("li", "o3d-group", label); head.setAttribute("role", "presentation"); list.appendChild(head);
       members.forEach((a) => this.renderRosterItem(a, list));
