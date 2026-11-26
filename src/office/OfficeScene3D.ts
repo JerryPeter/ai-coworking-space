@@ -46,7 +46,7 @@ export const STATUS: Record<AgentStatus, { label: string; color: string; use: st
 
 /** Compact name shown above an agent: first name plus a concise, lowercase role. */
 function officeLabel(name: string, role: string): string {
-  const firstName = name.trim().split(/\s+/)[0] || name;
+  const firstName = name.trim().split(/[\s,]+/)[0] || name;
   const shortRole = role.trim().toLowerCase();
   return shortRole ? `${firstName}, ${shortRole}` : firstName;
 }

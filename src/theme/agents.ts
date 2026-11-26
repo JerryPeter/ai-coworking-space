@@ -32,7 +32,7 @@ export const AGENTS: AgentIdentity[] = [
     cssVar: "--agent-bejita", hex: "#3B82F6", hexLight: "#1D4ED8", kind: "agent", desk: 9 },
   { id: "beerus_digital_lead", displayName: "Beerus The Digital Lead", shortName: "Beerus", role: "Digital & Creative Lead",
     cssVar: "--agent-beerus", hex: "#A855F7", hexLight: "#7E22CE", kind: "agent", desk: 11 },
-  { id: "picolo_ciso", displayName: "Picolo The CISO", shortName: "Picolo", role: "CISO",
+  { id: "picolo_ciso", displayName: "Picolo, CISO", shortName: "Picolo", role: "CISO",
     cssVar: "--agent-picolo", hex: "#10B981", hexLight: "#047857", kind: "agent", desk: 12 },
 ];
 

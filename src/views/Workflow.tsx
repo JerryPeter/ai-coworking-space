@@ -52,7 +52,7 @@ const DELEGATION: [string, string][] = [
   ["Menulis kode", "Kuririn The Dev (via Goku)"],
   ["Desain UI / review visual", "Bulma UI/UX"],
   ["Arsitektur & brief teknis", "Goku The CTO"],
-  ["Audit keamanan, risiko, insiden & kepatuhan", "Picolo (CISO)"],
+  ["Audit keamanan, risiko & kepatuhan", "Picolo (CISO)"],
   ["Konsep konten, riset & brief kreatif", "Beerus (Digital & Creative Lead)"],
   ["Editing & render video", "Bejita (Video Editor)"],
   ["Build, test & eksekusi kode", "Claude Code CLI"],
