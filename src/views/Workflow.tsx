@@ -39,12 +39,20 @@ const FLOWS: Flow[] = [
     [user("Mengajukan riset atau permintaan data")],
     [node("default", "Ditangani langsung atau melalui Goku")],
   ] },
+  { key: "keamanan", label: "Keamanan", title: "Audit & Insiden Keamanan", stages: [
+    [user("Melaporkan insiden atau meminta audit keamanan")],
+    [node("default", "Koordinasi & eskalasi keputusan")],
+    [node("picolo_ciso", "Audit risiko, investigasi & kontrol keamanan")],
+    [node("goku_cto", "Hardening & perbaikan teknis")],
+    [claude("Patch kode, verifikasi & test")],
+  ] },
 ];
 
 const DELEGATION: [string, string][] = [
   ["Menulis kode", "Kuririn The Dev (via Goku)"],
   ["Desain UI / review visual", "Bulma UI/UX"],
   ["Arsitektur & brief teknis", "Goku The CTO"],
+  ["Audit keamanan, risiko, insiden & kepatuhan", "Picolo (CISO)"],
   ["Konsep konten, riset & brief kreatif", "Beerus (Digital & Creative Lead)"],
   ["Editing & render video", "Bejita (Video Editor)"],
   ["Build, test & eksekusi kode", "Claude Code CLI"],

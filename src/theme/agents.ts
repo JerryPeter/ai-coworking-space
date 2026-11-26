@@ -13,7 +13,7 @@ export interface AgentIdentity {
   hexLight: string;
   kind: AgentKind;
   /** Fixed 3D-office desk (0..12). Claude CLI = 4, OpenClaw = 5..8, Bejita = 9, OpenCode = 10, Beerus = 11 (Lantai 1
-   *  Ruang Manager); 12 (Ruang Manager 2) is still free. New agents need an explicit free desk. */
+   *  Ruang Manager), Picolo = 12 (Lantai 1 Ruang Manager 2). New agents need an explicit free desk. */
   desk?: number;
 }
 
@@ -32,6 +32,8 @@ export const AGENTS: AgentIdentity[] = [
     cssVar: "--agent-bejita", hex: "#3B82F6", hexLight: "#1D4ED8", kind: "agent", desk: 9 },
   { id: "beerus_digital_lead", displayName: "Beerus The Digital Lead", shortName: "Beerus", role: "Digital & Creative Lead",
     cssVar: "--agent-beerus", hex: "#A855F7", hexLight: "#7E22CE", kind: "agent", desk: 11 },
+  { id: "picolo_ciso", displayName: "Picolo The CISO", shortName: "Picolo", role: "CISO",
+    cssVar: "--agent-picolo", hex: "#10B981", hexLight: "#047857", kind: "agent", desk: 12 },
 ];
 
 export const CLAUDE: AgentIdentity = {
@@ -92,6 +94,11 @@ export const PIXEL_MAPS: Record<string, PixelMap> = {
     // sharp slanted brows over narrow eyes, gold earrings at the jaw.
     rows: ["P......P", "PI....IP", "PPPPPPPP", "PBBPPBBP", "PPEPPEPP", "PPPPPPPP", "GPPMMPPG", "GPPPPPPG"],
     palette: { P: "#9B7FB8", I: "#6B4F88", B: "#2E1B3F", E: "#FACC15", M: "#5B3A6E", G: "#EAB308" },
+  },
+  picolo_ciso: {
+    // Picolo the Namekian CISO: white turban, pointed ears, green skin, stern brows, purple gi collar.
+    rows: ["..WWWW..", ".WWWWWW.", "WWTTTTWW", "PBBGGBBP", ".GEGGEG.", ".GGGGGG.", ".GGMMGG.", "VVGGGGVV"],
+    palette: { W: "#F8FAFC", T: "#CBD5E1", G: "#4ADE80", P: "#22C55E", B: "#14532D", E: "#111827", M: "#15803D", V: "#7E22CE" },
   },
   [CLAUDE_ID]: {
     rows: ["...A....", "...A....", "DDDDDDDD", "DFFFFFFD", "DFOFFOFD", "DFFFFFFD", "DFFOOFFD", "DDDDDDDD"],

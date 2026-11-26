@@ -43,6 +43,7 @@ AGENT_COLORS = {
     "bulma_uiux": "#F472B6",       # --agent-bulma
     "bejita_video_editor": "#3B82F6",  # --agent-bejita
     "beerus_digital_lead": "#FACC15",  # --agent-beerus
+    "picolo_ciso": "#10B981",          # --agent-picolo
 }
 CLAUDE_TOOL_COLOR = "#F97316"     # --agent-claude
 FALLBACK_COLOR = "#9AA0A6"        # unknown/new profile: placeholder until Susi assigns one
