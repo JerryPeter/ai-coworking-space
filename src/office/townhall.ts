@@ -827,6 +827,59 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     tube(0.33, -0.52, 0.75, -0.1); tube(0.33, 0.52, 0.75, -0.1); tube(0.75, -0.1, 0.78, 0.4); tube(0.33, 0.52, 0.78, 0.4); tube(0.33, -0.52, 0.95, -0.45);
     bx(o, 0.45, 0.03, 0.03, "#1c1e21", 0, 0.95, -0.45, false); bx(o, 0.12, 0.05, 0.22, "#1c1e21", 0, 0.8, 0.4, false); return o;
   }
+  function cartSignTex(bg: string, border: string, title: string, titleCol: string, sub: string, subCol: string) {
+    const c = document.createElement("canvas"); c.width = 512; c.height = 220; const x = c.getContext("2d")!;
+    x.fillStyle = bg; x.fillRect(0, 0, 512, 220); x.strokeStyle = border; x.lineWidth = 10; x.strokeRect(8, 8, 496, 204);
+    x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillStyle = titleCol; x.font = "900 72px Arial Black, Arial, sans-serif"; x.fillText(title, 256, 88);
+    x.fillStyle = subCol; x.font = "800 36px Arial, sans-serif"; x.fillText(sub, 256, 162);
+    return new THREE.CanvasTexture(c);
+  }
+  function SateCart() {
+    const o = G();
+    wheel(o, 0.28, 0.07, -0.45, 0.28, 0.38); wheel(o, 0.28, 0.07, 0.45, 0.28, 0.38);
+    bx(o, 1.4, 0.85, 0.68, "#7a4a24", 0, 0.32, 0); bx(o, 1.44, 0.06, 0.72, "#5a3418", 0, 0.32, 0, false); bx(o, 1.46, 0.05, 0.74, "#5a3418", 0, 1.12, 0, false);
+    for (const sx of [-1, 1]) bx(o, 0.18, 0.04, 0.04, "#5a3418", sx * 0.79, 0.95, 0, false);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) bx(o, 0.04, 0.95, 0.04, "#5a3418", sx * 0.66, 1.17, sz * 0.32, false);
+    bx(o, 1.56, 0.08, 0.88, "#2f8f4e", 0, 2.1, 0); bx(o, 1.6, 0.03, 0.92, "#f4f4f4", 0, 2.08, 0, false);
+    const gl = bx(o, 0.68, 0.48, 0.56, glassMat, -0.32, 1.17, 0, false); gl.renderOrder = 2;
+    cy(o, 0.09, 0.09, 0.22, "#c08a3e", -0.42, 1.17, 0, 10, false); cy(o, 0.05, 0.05, 0.24, "#2b1d12", -0.2, 1.17, 0.06, 8, false);
+    bx(o, 0.58, 0.16, 0.28, "#222", 0.34, 1.17, -0.05); bx(o, 0.52, 0.03, 0.22, "#e74c3c", 0.34, 1.32, -0.05, false); bx(o, 0.46, 0.02, 0.16, "#f39c12", 0.34, 1.34, -0.05, false);
+    for (let i = 0; i < 6; i++) { const xx = 0.14 + i * 0.08; bx(o, 0.02, 0.02, 0.32, "#d9b48f", xx, 1.35, -0.02, false); bx(o, 0.04, 0.03, 0.18, "#6e3b1e", xx, 1.35, -0.05, false); }
+    const st = cartSignTex("#c0392b", "#ffe27a", "SATE AYAM", "#ffffff", "MADURA", "#ffe27a");
+    const f1 = new THREE.Mesh(new THREE.PlaneGeometry(1.24, 0.52), new THREE.MeshLambertMaterial({ map: st })); f1.position.set(0, 0.72, 0.345); o.add(f1);
+    const f2 = new THREE.Mesh(new THREE.PlaneGeometry(1.24, 0.52), new THREE.MeshLambertMaterial({ map: st })); f2.rotation.y = Math.PI; f2.position.set(0, 0.72, -0.345); o.add(f2);
+    return o;
+  }
+  function GorenganCart() {
+    const o = G();
+    wheel(o, 0.28, 0.07, -0.42, 0.28, 0.34); wheel(o, 0.28, 0.07, 0.42, 0.28, 0.34);
+    bx(o, 1.3, 0.82, 0.62, "#f1c40f", 0, 0.32, 0); bx(o, 1.34, 0.06, 0.66, "#1f6feb", 0, 0.32, 0, false); bx(o, 1.36, 0.05, 0.68, "#1f6feb", 0, 1.09, 0, false);
+    const gl = bx(o, 0.78, 0.48, 0.54, glassMat, -0.2, 1.14, 0, false); gl.renderOrder = 2;
+    for (let i = 0; i < 5; i++) bx(o, 0.12, 0.09, 0.16, ["#e8b84b", "#f0c75e", "#d9a441", "#e8b84b", "#5fb455"][i], -0.46 + i * 0.13, 1.16, 0, false);
+    cy(o, 0.24, 0.16, 0.12, "#1c1e21", 0.38, 1.15, 0, 14); cy(o, 0.2, 0.2, 0.02, "#e6b83a", 0.38, 1.24, 0, 12, false);
+    cy(o, 0.025, 0.025, 2.1, "#dcdcdc", 0.4, 0.35, 0.15, 6, false);
+    const u = new THREE.Mesh(new THREE.ConeGeometry(1.3, 0.4, 10), mat("#e67e22")); u.position.set(0.4, 2.45, 0.15); u.castShadow = true; o.add(u);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.26, 0.025, 4, 20), mat("#f1c40f")); rim.rotation.x = Math.PI / 2; rim.position.set(0.4, 2.26, 0.15); o.add(rim);
+    const gt = cartSignTex("#1f6feb", "#f1c40f", "GORENGAN", "#f1c40f", "TAHU BULAT · HANGAT", "#ffffff");
+    const f1 = new THREE.Mesh(new THREE.PlaneGeometry(1.16, 0.5), new THREE.MeshLambertMaterial({ map: gt })); f1.rotation.y = Math.PI; f1.position.set(0, 0.71, -0.315); o.add(f1);
+    return o;
+  }
+  function EsCendolCart() {
+    const o = G();
+    wheel(o, 0.26, 0.07, -0.4, 0.26, 0.34); wheel(o, 0.26, 0.07, 0.4, 0.26, 0.34);
+    bx(o, 1.25, 0.8, 0.62, "#2ecc71", 0, 0.32, 0); bx(o, 1.29, 0.06, 0.66, "#ffffff", 0, 0.32, 0, false); bx(o, 1.31, 0.05, 0.68, "#ffffff", 0, 1.08, 0, false);
+    cy(o, 0.13, 0.12, 0.32, "#55a630", -0.32, 1.13, 0, 12); cy(o, 0.14, 0.14, 0.03, "#dfe6ea", -0.32, 1.45, 0, 12, false);
+    cy(o, 0.13, 0.12, 0.32, "#f4f4f4", 0.05, 1.13, 0, 12); cy(o, 0.14, 0.14, 0.03, "#dfe6ea", 0.05, 1.45, 0, 12, false);
+    cy(o, 0.04, 0.04, 0.22, "#e63946", -0.14, 1.13, -0.16, 8, false); cy(o, 0.04, 0.04, 0.22, "#6f4e37", -0.02, 1.13, -0.16, 8, false);
+    [[0.32, 1.24, -0.08], [0.46, 1.24, -0.08], [0.38, 1.24, 0.1], [0.39, 1.42, 0]].forEach((p) => ico(o, 0.13, "#55a630", p[0], p[1], p[2]));
+    cy(o, 0.025, 0.025, 2.15, "#dcdcdc", -0.4, 0.35, 0.15, 6, false);
+    const u = new THREE.Mesh(new THREE.ConeGeometry(1.4, 0.42, 12), mat("#2ecc71")); u.position.set(-0.4, 2.5, 0.15); u.castShadow = true; o.add(u);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.36, 0.025, 4, 24), mat("#ffffff")); rim.rotation.x = Math.PI / 2; rim.position.set(-0.4, 2.3, 0.15); o.add(rim);
+    const ct = cartSignTex("#1e9e54", "#ffffff", "ES CENDOL", "#ffffff", "KELAPA MUDA", "#ffe27a");
+    const f1 = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.48), new THREE.MeshLambertMaterial({ map: ct })); f1.rotation.y = Math.PI; f1.position.set(0, 0.7, -0.315); o.add(f1);
+    return o;
+  }
 
   /* ====== Front facade (photo reference) ====== */
   function concreteCanvas() {
@@ -1380,7 +1433,7 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
       for (let x = a + 150; x < b - 60; x += 300) { if (x > -300 && x < 0) continue; put(g, WhitePlanter(), x, 2048, 0, 0.12); }
     }
     // trees + mulch, wooden benches, white street lamps
-    const vend = [[300, 90], [640, 90], [2270, 100]];
+    const vend = [[-580, 90], [300, 90], [640, 90], [1910, 90], [2270, 100]];
     // Keep both gate corridors clear: gate gaps ±60 px margin for the 1.25 m mulch pit.
     const gateLane = [[880, 1220], [1280, 1820]];
     for (let x = -1450; x < 3500; x += 240) { if (vend.some((v) => Math.abs(x - v[0]) < v[1]) || gateLane.some(([a, b]) => x >= a && x <= b)) continue; put(g, MulchPit(), x, 2235, 0, 0); put(g, TreeSlim(0.95 + rnd() * 0.2), x, 2235, rnd() * 360, 0.14); }
@@ -1389,9 +1442,13 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     // street vendors (group, toggled from the visual settings)
     const vG = G(); g.add(vG); vendGroup = vG;
     put(vG, CoffeeBike(), 300, 2185, 90, 0.12); put(vG, Folk({ shirt: "#2a7a5a", pants: "#333", hair: "#1b1b1b" }), 300, 2150, 180, 0.12);
+    put(vG, Folk({ shirt: "#9fc0f5", pants: "#2f343a", hair: "#3a2a1a" }), 265, 2155, 135, 0.12);
+    roomLabel(vG, "Kopi Sepeda", 300, 2185, 2.7);
     put(vG, FoodCart(), 640, 2185, 0, 0.12); put(vG, Folk({ shirt: "#f0f0f0", pants: "#3b4f6e", hair: "#2d2420" }), 640, 2222, 0, 0.12);
     put(vG, PStool(), 565, 2175, 0, 0.12); put(vG, PStool("#2e86c1"), 715, 2175, 0, 0.12);
     put(vG, Folk({ shirt: "#9b5cc9", pants: "#2f3540", hair: "#5a3a24", sit: true }), 565, 2175, 90, 0.12);
+    put(vG, Folk({ shirt: "#e6eefb", pants: "#1f2f6b", hair: "#2b1d12", sit: true }), 715, 2175, -90, 0.12);
+    roomLabel(vG, "Bakso & Mie Ayam", 640, 2185, 2.6);
     put(vG, PecelLele(), -150, 2116, 0, 0.12);
     put(vG, Folk({ shirt: "#ffffff", pants: "#2f3540", hair: "#1b1b1b" }), -88, 2106, -90, 0.12);
     put(vG, Folk({ shirt: "#d14f6a", pants: "#3b4f6e", hair: "#5a3a24", sit: true }), -162, 2085, 180, 0.12);
@@ -1404,6 +1461,24 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     { const h = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.6), mat("#1c1e21")); h.position.set(0, 1.62, 0); cust.add(h); }
     put(vG, Bicycle(), 2205, 2135, 90, 0.12);
     roomLabel(vG, "Kopi Keliling", 2270, 2172, 3.0);
+    put(vG, EsCendolCart(), -580, 2185, 0, 0.12);
+    put(vG, Folk({ shirt: "#2ecc71", pants: "#ffffff", hair: "#2b1d12" }), -580, 2222, 0, 0.12);
+    put(vG, PStool("#2ecc71"), -645, 2175, 0, 0.12); put(vG, PStool("#e74c3c"), -515, 2175, 0, 0.12);
+    put(vG, Folk({ shirt: "#e74c3c", pants: "#2f343a", hair: "#2b1d12", sit: true }), -645, 2175, 90, 0.12);
+    put(vG, Folk({ shirt: "#3b5bd9", pants: "#1f2f6b", hair: "#3a2a1a" }), -525, 2150, 160, 0.12);
+    roomLabel(vG, "Es Cendol & Kelapa", -580, 2185, 2.8);
+    put(vG, SateCart(), 1250, 2128, 180, 0.12);
+    put(vG, Folk({ shirt: "#c0392b", pants: "#1a1a1a", hair: "#2b1d12" }), 1250, 2094, 180, 0.12);
+    put(vG, PStool("#d64541"), 1195, 2128, 0, 0.12);
+    put(vG, Folk({ shirt: "#3b5bd9", pants: "#2f343a", hair: "#2b1d12", sit: true }), 1195, 2128, 90, 0.12);
+    put(vG, Folk({ shirt: "#e6eefb", pants: "#1f2f6b", hair: "#3a2a1a" }), 1295, 2134, -90, 0.12);
+    roomLabel(vG, "Sate Ayam Madura", 1250, 2128, 2.7);
+    put(vG, GorenganCart(), 1910, 2220, 0, 0.12);
+    put(vG, Folk({ shirt: "#1f6feb", pants: "#2b2e31", hair: "#2b1d12" }), 1910, 2254, 0, 0.12);
+    put(vG, PStool("#27ae60"), 1848, 2220, 0, 0.12);
+    put(vG, Folk({ shirt: "#f1c40f", pants: "#2f343a", hair: "#2b1d12", sit: true }), 1848, 2220, 90, 0.12);
+    put(vG, Folk({ shirt: "#ffffff", pants: "#1f2f6b", hair: "#3a2a1a" }), 1968, 2212, -60, 0.12);
+    roomLabel(vG, "Gorengan & Tahu Bulat", 1910, 2220, 2.7);
     // trees
     [[250, 200, 1.2], [140, 470, 1], [330, 640, 1.3], [190, 900, 1.1], [330, 1140, 1], [110, 1180, 0.9], [620, -3000, 1.2], [1000, -3030, 1.4], [1400, -2990, 1.1], [1760, -3020, 1.3], [120, -2300, 1.2], [2120, -2300, 1.3], [150, -2900, 1.1], [2100, -2950, 1.2], [250, -600, 1.2], [2000, -500, 1.3], [250, -1500, 1.3], [2000, -1600, 1.2],
       [1960, 300, 1.2], [2060, 720, 1.4], [1930, 1120, 1], [2070, 1520, 1.3], [1950, 1860, 1.1], [-120, 1520, 1.2], [-160, 1900, 1], [200, 2760, 1.3], [820, 2790, 1.1], [1500, 2760, 1.4], [2150, 2780, 1.2], [-400, 2770, 1]]
@@ -1627,7 +1702,11 @@ export function createTownHall(scene: THREE.Scene, shadowSize = 4096): TownHall 
     setScope(s: Scope) { envScope = s; updateEnv(); },
     setClouds(on: boolean) { showClouds = on; updateEnv(); },
     setLow(on: boolean) { lowWalls = on; applyLow(); },
-    setVendors(on: boolean) { if (vendGroup) vendGroup.visible = on; },
+    setVendors(on: boolean) {
+      if (!vendGroup) return;
+      vendGroup.visible = on;
+      vendGroup.traverse((c) => { if (c instanceof CSS2DObject) c.element.style.display = on ? "" : "none"; });
+    },
     labelVisible(f: number) {
       if (f === 0) return envScope === "all";
       if (mode === "all") return f === (lowWalls ? 3 : 4);
